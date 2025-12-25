@@ -69,6 +69,75 @@ interface ValidationContext {
   defs: Record<string, JsonSchemaValue>;
 }
 
+const SCHEMA_GENERATION_PROMPT = `Generate a JSON Schema for structured LLM output based on the user's description.
+
+Requirements:
+- Output ONLY valid JSON, no markdown, no explanation
+- Use this exact wrapper format: {"name": "SchemaName", "strict": true, "value": {...}}
+- The "value" must be a valid JSON Schema with "type": "object"
+- Add "additionalProperties": false to ALL object types (required for Anthropic)
+- All object properties should be in a "required" array unless explicitly optional
+- Use simple types: string, number, integer, boolean, array, object
+- For arrays, always specify "items" with a schema
+- Keep it minimal - only what the user asked for
+
+User's description:`;
+
+export async function generateSchemaFromDescription(description: string): Promise<{
+  success: boolean;
+  schema?: string;
+  error?: string;
+}> {
+    const { generateRaw } = SillyTavern.getContext();
+
+    if (!description.trim()) {
+        return { success: false, error: 'Please describe what you want in the schema' };
+    }
+
+    try {
+        const response = await generateRaw({
+            prompt: `${SCHEMA_GENERATION_PROMPT}\n\n${description}`,
+            systemPrompt: 'You are a JSON Schema expert. Output only valid JSON, nothing else.',
+        });
+
+        // Clean up response - strip markdown code blocks if present
+        let cleaned = response.trim();
+        if (cleaned.startsWith('```')) {
+            cleaned = cleaned.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+        }
+
+        // Validate what we got
+        const validation = validateSchema(cleaned);
+
+        if (!validation.valid) {
+            return {
+                success: false,
+                error: `Generated schema is invalid: ${validation.error}`,
+                schema: cleaned, // Return it anyway so user can fix
+            };
+        }
+
+        // Auto-fix if needed
+        if (validation.warnings?.length) {
+            const fixed = autoFixSchema(validation.schema!);
+            return {
+                success: true,
+                schema: JSON.stringify(fixed, null, 2),
+            };
+        }
+
+        return {
+            success: true,
+            schema: JSON.stringify(validation.schema, null, 2),
+        };
+    } catch (e) {
+        return {
+            success: false,
+            error: `Generation failed: ${(e as Error).message}`,
+        };
+    }
+}
+
 // ============================================================================
 // MAIN VALIDATION FUNCTION
 // ============================================================================

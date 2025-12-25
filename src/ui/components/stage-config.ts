@@ -4,7 +4,7 @@
 
 import { MODULE_NAME, STAGE_LABELS } from '../../constants';
 import { getPromptPresets, getSchemaPresets, getPromptPreset, getSchemaPreset, savePromptPreset, saveSchemaPreset } from '../../settings';
-import { validateSchema, autoFixSchema } from '../../schema';
+import { validateSchema, autoFixSchema, generateSchemaFromDescription } from '../../schema';
 import type { StageName, StageConfig, PromptPreset, SchemaPreset } from '../../types';
 
 // ============================================================================
@@ -141,6 +141,14 @@ export function renderStageConfig(
         <!-- Schema Actions -->
         <div class="${MODULE_NAME}_schema_actions">
           <button
+            id="${MODULE_NAME}_generate_schema_btn"
+            class="menu_button menu_button_icon"
+            title="Generate schema from description"
+          >
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+            <span>Generate</span>
+          </button>
+          <button
             id="${MODULE_NAME}_validate_schema_btn"
             class="menu_button menu_button_icon"
             title="Validate schema"
@@ -180,9 +188,39 @@ export function renderStageConfig(
   `;
 }
 
+
 // ============================================================================
 // UPDATE STATE
 // ============================================================================
+// Export this new handler
+export async function handleGenerateSchema(): Promise<string | null> {
+    const { Popup, POPUP_RESULT } = SillyTavern.getContext();
+
+    const description = await Popup.show.input(
+        'Generate Schema',
+        'Describe the structure you want (e.g., <q>"scores for each field 1-10, list of suggestions, overall rating"</q>):\n',
+        '',
+    );
+
+    if (description === null || description === POPUP_RESULT.CANCELLED || !description.trim()) {
+        return null;
+    }
+
+    toastr.info('Generating schema...');
+
+    const result = await generateSchemaFromDescription(description);
+
+    if (result.success) {
+        toastr.success('Schema generated!');
+        return result.schema!;
+    } else {
+        toastr.error(result.error || 'Generation failed');
+        // Return the broken schema anyway so they can see/fix it
+        return result.schema || null;
+    }
+}
+
+
 
 export function updateStageConfigState(
     container: HTMLElement,

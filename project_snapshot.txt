@@ -1,5 +1,5 @@
 # PROJECT SNAPSHOT
-Generated: Thu Dec 25 12:06:36 AM MST 2025
+Generated: Thu Dec 25 12:34:25 AM MST 2025
 
 ## DIRECTORY STRUCTURE
 ```
@@ -2120,6 +2120,75 @@ interface ValidationContext {
   currentDepth: number;
   seenRefs: Set<string>;
   defs: Record<string, JsonSchemaValue>;
+}
+
+const SCHEMA_GENERATION_PROMPT = `Generate a JSON Schema for structured LLM output based on the user's description.
+
+Requirements:
+- Output ONLY valid JSON, no markdown, no explanation
+- Use this exact wrapper format: {"name": "SchemaName", "strict": true, "value": {...}}
+- The "value" must be a valid JSON Schema with "type": "object"
+- Add "additionalProperties": false to ALL object types (required for Anthropic)
+- All object properties should be in a "required" array unless explicitly optional
+- Use simple types: string, number, integer, boolean, array, object
+- For arrays, always specify "items" with a schema
+- Keep it minimal - only what the user asked for
+
+User's description:`;
+
+export async function generateSchemaFromDescription(description: string): Promise<{
+  success: boolean;
+  schema?: string;
+  error?: string;
+}> {
+    const { generateRaw } = SillyTavern.getContext();
+
+    if (!description.trim()) {
+        return { success: false, error: 'Please describe what you want in the schema' };
+    }
+
+    try {
+        const response = await generateRaw({
+            prompt: `${SCHEMA_GENERATION_PROMPT}\n\n${description}`,
+            systemPrompt: 'You are a JSON Schema expert. Output only valid JSON, nothing else.',
+        });
+
+        // Clean up response - strip markdown code blocks if present
+        let cleaned = response.trim();
+        if (cleaned.startsWith('```')) {
+            cleaned = cleaned.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+        }
+
+        // Validate what we got
+        const validation = validateSchema(cleaned);
+
+        if (!validation.valid) {
+            return {
+                success: false,
+                error: `Generated schema is invalid: ${validation.error}`,
+                schema: cleaned, // Return it anyway so user can fix
+            };
+        }
+
+        // Auto-fix if needed
+        if (validation.warnings?.length) {
+            const fixed = autoFixSchema(validation.schema!);
+            return {
+                success: true,
+                schema: JSON.stringify(fixed, null, 2),
+            };
+        }
+
+        return {
+            success: true,
+            schema: JSON.stringify(validation.schema, null, 2),
+        };
+    } catch (e) {
+        return {
+            success: false,
+            error: `Generation failed: ${(e as Error).message}`,
+        };
+    }
 }
 
 // ============================================================================
@@ -4979,6 +5048,7 @@ import {
     handleValidateSchema,
     handleFixSchema,
     handleFormatSchema,
+    handleGenerateSchema,  // Add this
 } from './components/stage-config';
 import { renderResultsPanel, updateResultsPanelState } from './components/results-panel';
 import { openSettingsModal } from './settings-modal';
@@ -5438,7 +5508,7 @@ function initStageConfigListeners(): void {
                 promptPresetId: null,
             });
             updateTokenEstimate();
-            updateStageConfigUI();  // Already exists in scope, handles everything
+            updateStageConfigUI();
         }
 
         if (textarea.id === `${MODULE_NAME}_custom_schema` && popupState) {
@@ -5446,7 +5516,7 @@ function initStageConfigListeners(): void {
                 customSchema: textarea.value,
                 schemaPresetId: null,
             });
-            updateStageConfigUI();  // Same here
+            updateStageConfigUI();
         }
     }, 300));
 
@@ -5479,7 +5549,6 @@ function initStageConfigListeners(): void {
             if (promptTextarea) {
                 const result = await handleSavePromptPreset(popupState.activeStageView, promptTextarea.value);
                 if (result.success && result.presetId) {
-                    // Select the newly saved preset and clear custom
                     popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, popupState.activeStageView, {
                         promptPresetId: result.presetId,
                         customPrompt: '',
@@ -5497,10 +5566,27 @@ function initStageConfigListeners(): void {
             if (schemaTextarea) {
                 const result = await handleSaveSchemaPreset(popupState.activeStageView, schemaTextarea.value);
                 if (result.success && result.presetId) {
-                    // Select the newly saved preset and clear custom
                     popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, popupState.activeStageView, {
                         schemaPresetId: result.presetId,
                         customSchema: '',
+                    });
+                    updateStageConfigUI();
+                }
+            }
+            return;
+        }
+
+        // Generate schema button
+        const generateBtn = target.closest(`#${MODULE_NAME}_generate_schema_btn`);
+        if (generateBtn && popupState) {
+            const generated = await handleGenerateSchema();
+            if (generated) {
+                const schemaTextarea = popupElement?.querySelector(`#${MODULE_NAME}_custom_schema`) as HTMLTextAreaElement;
+                if (schemaTextarea) {
+                    schemaTextarea.value = generated;
+                    popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, popupState.activeStageView, {
+                        customSchema: generated,
+                        schemaPresetId: null,
                     });
                     updateStageConfigUI();
                 }
@@ -5526,7 +5612,6 @@ function initStageConfigListeners(): void {
                 const fixed = handleFixSchema(schemaTextarea.value);
                 if (fixed) {
                     schemaTextarea.value = fixed;
-                    // Update state
                     popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, popupState.activeStageView, {
                         customSchema: fixed,
                         schemaPresetId: null,
@@ -5545,7 +5630,6 @@ function initStageConfigListeners(): void {
                 const formatted = handleFormatSchema(schemaTextarea.value);
                 if (formatted) {
                     schemaTextarea.value = formatted;
-                    // Update state
                     popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, popupState.activeStageView, {
                         customSchema: formatted,
                         schemaPresetId: null,
@@ -5557,6 +5641,7 @@ function initStageConfigListeners(): void {
         }
     });
 }
+
 
 // ============================================================================
 // RESULTS PANEL LISTENERS
@@ -6817,7 +6902,7 @@ export function updatePipelineNavState(
 
 import { MODULE_NAME, STAGE_LABELS } from '../../constants';
 import { getPromptPresets, getSchemaPresets, getPromptPreset, getSchemaPreset, savePromptPreset, saveSchemaPreset } from '../../settings';
-import { validateSchema, autoFixSchema } from '../../schema';
+import { validateSchema, autoFixSchema, generateSchemaFromDescription } from '../../schema';
 import type { StageName, StageConfig, PromptPreset, SchemaPreset } from '../../types';
 
 // ============================================================================
@@ -6954,6 +7039,14 @@ export function renderStageConfig(
         <!-- Schema Actions -->
         <div class="${MODULE_NAME}_schema_actions">
           <button
+            id="${MODULE_NAME}_generate_schema_btn"
+            class="menu_button menu_button_icon"
+            title="Generate schema from description"
+          >
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+            <span>Generate</span>
+          </button>
+          <button
             id="${MODULE_NAME}_validate_schema_btn"
             class="menu_button menu_button_icon"
             title="Validate schema"
@@ -6993,9 +7086,39 @@ export function renderStageConfig(
   `;
 }
 
+
 // ============================================================================
 // UPDATE STATE
 // ============================================================================
+// Export this new handler
+export async function handleGenerateSchema(): Promise<string | null> {
+    const { Popup, POPUP_RESULT } = SillyTavern.getContext();
+
+    const description = await Popup.show.input(
+        'Generate Schema',
+        'Describe the structure you want (e.g., <q>"scores for each field 1-10, list of suggestions, overall rating"</q>):\n',
+        '',
+    );
+
+    if (description === null || description === POPUP_RESULT.CANCELLED || !description.trim()) {
+        return null;
+    }
+
+    toastr.info('Generating schema...');
+
+    const result = await generateSchemaFromDescription(description);
+
+    if (result.success) {
+        toastr.success('Schema generated!');
+        return result.schema!;
+    } else {
+        toastr.error(result.error || 'Generation failed');
+        // Return the broken schema anyway so they can see/fix it
+        return result.schema || null;
+    }
+}
+
+
 
 export function updateStageConfigState(
     container: HTMLElement,

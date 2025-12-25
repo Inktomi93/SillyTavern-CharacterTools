@@ -23,7 +23,7 @@ import {
     buildStagePrompt,
     getStageSchema,
 } from '../pipeline';
-import { runStageGeneration, getStageTokenCount, getApiInfo } from '../generator';
+import { runStageGeneration, getStageTokenCount, getApiInfo, isApiReady } from '../generator';
 import { renderCharacterSelect, updateCharacterSelectState, renderDropdownItems, updateFieldTokenCounts } from './components/character-select';
 import { getPopulatedFields } from '../character';
 import { renderPipelineNav, updatePipelineNavState } from './components/pipeline-nav';
@@ -35,6 +35,7 @@ import {
     handleValidateSchema,
     handleFixSchema,
     handleFormatSchema,
+    handleGenerateSchema,
 } from './components/stage-config';
 import { renderResultsPanel, updateResultsPanelState } from './components/results-panel';
 import { openSettingsModal } from './settings-modal';
@@ -45,26 +46,233 @@ import type { PipelineState, StageName, Character } from '../types';
 // ============================================================================
 
 let popupState: {
-  pipeline: PipelineState;
-  isGenerating: boolean;
-  abortController: AbortController | null;
-  activeStageView: StageName;
+    pipeline: PipelineState;
+    isGenerating: boolean;
+    abortController: AbortController | null;
+    activeStageView: StageName;
+    characters: Character[];
 } | null = null;
 
 let popupElement: HTMLElement | null = null;
 
+// ============================================================================
+// EVENT MANAGEMENT
+// ============================================================================
+
+const eventCleanup: Array<() => void> = [];
+
+function subscribeEvents(): void {
+    const { eventSource, eventTypes } = SillyTavern.getContext();
+
+    const handlers = {
+        onStatusChange: () => {
+            debugLog('info', 'API status changed', { isReady: isApiReady() });
+            updateApiStatus();
+        },
+
+        onCharEdited: () => {
+            debugLog('info', 'Character edited externally', null);
+            refreshSelectedCharacter();
+        },
+
+        onCharDeleted: (data: { id: number; character: Character }) => {
+            debugLog('info', 'Character deleted', { id: data.id });
+            handleCharacterDeleted(data.id);
+        },
+
+        onPresetChanged: () => {
+            debugLog('info', 'OAI preset changed', null);
+            // If using current settings, token estimates may change
+            if (popupState) {
+                updateTokenEstimate();
+            }
+        },
+
+        onSourceChanged: () => {
+            debugLog('info', 'Chat completion source changed', null);
+            updateApiStatus();
+            updateTokenEstimate();
+        },
+
+        onModelChanged: () => {
+            debugLog('info', 'Chat completion model changed', null);
+            updateApiStatus();
+            updateTokenEstimate();
+        },
+    };
+
+    eventSource.on(eventTypes.ONLINE_STATUS_CHANGED, handlers.onStatusChange);
+    eventSource.on(eventTypes.CHARACTER_EDITED, handlers.onCharEdited);
+    eventSource.on(eventTypes.CHARACTER_DELETED, handlers.onCharDeleted);
+    eventSource.on(eventTypes.OAI_PRESET_CHANGED_AFTER, handlers.onPresetChanged);
+    eventSource.on(eventTypes.CHATCOMPLETION_SOURCE_CHANGED, handlers.onSourceChanged);
+    eventSource.on(eventTypes.CHATCOMPLETION_MODEL_CHANGED, handlers.onModelChanged);
+
+    eventCleanup.push(
+        () => eventSource.removeListener(eventTypes.ONLINE_STATUS_CHANGED, handlers.onStatusChange),
+        () => eventSource.removeListener(eventTypes.CHARACTER_EDITED, handlers.onCharEdited),
+        () => eventSource.removeListener(eventTypes.CHARACTER_DELETED, handlers.onCharDeleted),
+        () => eventSource.removeListener(eventTypes.OAI_PRESET_CHANGED_AFTER, handlers.onPresetChanged),
+        () => eventSource.removeListener(eventTypes.CHATCOMPLETION_SOURCE_CHANGED, handlers.onSourceChanged),
+        () => eventSource.removeListener(eventTypes.CHATCOMPLETION_MODEL_CHANGED, handlers.onModelChanged),
+    );
+
+    debugLog('info', 'Event listeners subscribed', { count: eventCleanup.length });
+}
+
+function unsubscribeEvents(): void {
+    eventCleanup.forEach(fn => fn());
+    eventCleanup.length = 0;
+    debugLog('info', 'Event listeners unsubscribed', null);
+}
+
+// ============================================================================
+// EVENT HANDLERS
+// ============================================================================
+
+function updateApiStatus(): void {
+    if (!popupElement) return;
+
+    const apiInfo = getApiInfo();
+    const statusEl = popupElement.querySelector(`.${MODULE_NAME}_api_status`);
+
+    if (statusEl) {
+        statusEl.className = `${MODULE_NAME}_api_status ${apiInfo.isReady ? 'connected' : 'disconnected'}`;
+        const textSpan = statusEl.querySelector('span');
+        if (textSpan) {
+            textSpan.textContent = apiInfo.source;
+        }
+    }
+
+    // Update run buttons based on API status
+    updatePipelineNav();
+}
+
+function refreshSelectedCharacter(): void {
+    if (!popupState || popupState.pipeline.characterIndex === null) return;
+
+    const { characters } = SillyTavern.getContext();
+    const charList = characters as Character[];
+    const index = popupState.pipeline.characterIndex;
+
+    // Update our cached character list
+    popupState.characters = charList;
+
+    // Check if the character still exists at this index
+    if (index >= 0 && index < charList.length) {
+        const updatedChar = charList[index];
+
+        // Check if it's the same character (by name, since that's our best identifier)
+        if (updatedChar.name === popupState.pipeline.character?.name) {
+            // Same character, update the reference
+            popupState.pipeline = {
+                ...popupState.pipeline,
+                character: updatedChar,
+            };
+            updateCharacterSelect();
+            updateTokenEstimate();
+            debugLog('info', 'Character refreshed', { name: updatedChar.name });
+        } else {
+            // Different character at this index - character was probably deleted/reordered
+            handleCharacterInvalidated();
+        }
+    } else {
+        // Index out of bounds
+        handleCharacterInvalidated();
+    }
+}
+
+function handleCharacterDeleted(deletedId: number): void {
+    if (!popupState) return;
+
+    const currentIndex = popupState.pipeline.characterIndex;
+
+    if (currentIndex === null) return;
+
+    if (currentIndex === deletedId) {
+        // Our selected character was deleted
+        handleCharacterInvalidated();
+        toastr.warning('Selected character was deleted');
+    } else if (currentIndex > deletedId) {
+        // Character before ours was deleted, our index shifted down
+        const newIndex = currentIndex - 1;
+        const { characters } = SillyTavern.getContext();
+        const charList = characters as Character[];
+
+        if (newIndex >= 0 && newIndex < charList.length) {
+            popupState.pipeline = {
+                ...popupState.pipeline,
+                characterIndex: newIndex,
+                character: charList[newIndex],
+            };
+            popupState.characters = charList;
+            debugLog('info', 'Character index adjusted after deletion', { oldIndex: currentIndex, newIndex });
+        } else {
+            handleCharacterInvalidated();
+        }
+    }
+    // If deleted index > current index, no change needed
+}
+
+function handleCharacterInvalidated(): void {
+    if (!popupState) return;
+
+    debugLog('info', 'Character invalidated, clearing selection', null);
+
+    popupState.pipeline = setCharacter(popupState.pipeline, null, null);
+    updateAllComponents();
+    toastr.info('Character selection cleared');
+}
+
+// ============================================================================
+// GLOBAL LISTENERS
+// ============================================================================
+
 let documentClickHandler: ((e: MouseEvent) => void) | null = null;
+let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+
+function initGlobalListeners(): void {
+    // Keyboard shortcuts
+    keyboardHandler = (e: KeyboardEvent) => {
+        if (!popupState) return;
+
+        // Ctrl+Enter to run current stage
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            if (!popupState.isGenerating) {
+                runSingleStage(popupState.activeStageView);
+            }
+        }
+
+        // Escape to cancel generation
+        if (e.key === 'Escape' && popupState.isGenerating && popupState.abortController) {
+            popupState.abortController.abort();
+        }
+    };
+
+    document.addEventListener('keydown', keyboardHandler);
+}
+
+function removeGlobalListeners(): void {
+    if (keyboardHandler) {
+        document.removeEventListener('keydown', keyboardHandler);
+        keyboardHandler = null;
+    }
+    if (documentClickHandler) {
+        document.removeEventListener('click', documentClickHandler);
+        documentClickHandler = null;
+    }
+}
 
 // ============================================================================
 // MAIN ENTRY
 // ============================================================================
 
-/**
- * Open the main Character Tools popup
- */
 export async function openMainPopup(): Promise<void> {
     const { Popup, POPUP_TYPE, characters } = SillyTavern.getContext();
     const { DOMPurify } = SillyTavern.libs;
+
+    const charList = characters as Character[];
 
     // Initialize state
     popupState = {
@@ -72,6 +280,7 @@ export async function openMainPopup(): Promise<void> {
         isGenerating: false,
         abortController: null,
         activeStageView: 'score',
+        characters: charList,
     };
 
     const content = buildPopupContent();
@@ -91,6 +300,7 @@ export async function openMainPopup(): Promise<void> {
         }
         popupState = null;
         popupElement = null;
+        unsubscribeEvents();
         removeGlobalListeners();
         debugLog('info', 'Popup closed', null);
     });
@@ -100,12 +310,13 @@ export async function openMainPopup(): Promise<void> {
 
     popupElement = document.getElementById(`${MODULE_NAME}_popup`);
 
-    // Initialize components
-    initComponents(characters as Character[]);
-    initKeyboardShortcuts();
+    // Initialize
+    subscribeEvents();
+    initGlobalListeners();
+    initComponents(charList);
     updateAllComponents();
 
-    debugLog('info', 'Popup opened', { characterCount: (characters as Character[]).length });
+    debugLog('info', 'Popup opened', { characterCount: charList.length });
 }
 
 // ============================================================================
@@ -234,7 +445,6 @@ function initComponents(characters: Character[]): void {
     });
 
     popupElement.querySelector(`#${MODULE_NAME}_close_btn`)?.addEventListener('click', () => {
-        // Find and close the popup
         const dialog = popupElement?.closest('.popup');
         if (dialog) {
             const cancelBtn = dialog.querySelector('.popup-button-cancel, .popup-button-ok') as HTMLElement;
@@ -250,8 +460,7 @@ function initComponents(characters: Character[]): void {
 function initCharacterSelectListeners(characters: Character[]): void {
     if (!popupElement) return;
 
-    const { Fuse } = SillyTavern.libs;
-    const { lodash } = SillyTavern.libs;
+    const { Fuse, lodash } = SillyTavern.libs;
 
     const container = popupElement.querySelector(`#${MODULE_NAME}_character_select_container`);
     if (!container) return;
@@ -261,22 +470,24 @@ function initCharacterSelectListeners(characters: Character[]): void {
 
     if (!searchInput || !dropdown) return;
 
-    // Build Fuse index
-    const charData = characters
-        .map((char, index) => ({ char, index }))
-        .filter(({ char }) => char?.name);
-
-    const fuse = new Fuse(charData, {
-        keys: ['char.name', 'char.description'],
-        threshold: 0.4,
-        includeScore: true,
-        minMatchCharLength: 1,
-    });
+    // DELETED: the unused fuse and charData declarations
 
     let selectedIndex = -1;
-    let currentResults: typeof charData = [];
+    let currentResults: Array<{ char: Character; index: number }> = [];
 
     const handleSearch = () => {
+        const currentChars = popupState?.characters || characters;
+        const currentCharData = currentChars
+            .map((char, index) => ({ char, index }))
+            .filter(({ char }) => char?.name);
+
+        const fuse = new Fuse(currentCharData, {
+            keys: ['char.name', 'char.description'],
+            threshold: 0.4,
+            includeScore: true,
+            minMatchCharLength: 1,
+        });
+
         const query = searchInput.value.trim();
 
         if (!query) {
@@ -286,7 +497,7 @@ function initCharacterSelectListeners(characters: Character[]): void {
         }
 
         const results = fuse.search(query, { limit: 10 });
-        currentResults = results.map((r: { item: typeof charData[number] }) => r.item);
+        currentResults = results.map((r: { item: { char: Character; index: number } }) => r.item);
 
         if (currentResults.length === 0) {
             dropdown.innerHTML = `<div class="${MODULE_NAME}_dropdown_empty">No characters found</div>`;
@@ -375,14 +586,13 @@ function initCharacterSelectListeners(characters: Character[]): void {
     });
 }
 
-
 function selectCharacter(char: Character, index: number): void {
     if (!popupState) return;
 
     popupState.pipeline = setCharacter(popupState.pipeline, char, index);
     updateAllComponents();
 
-    // Update field token counts after a short delay (let DOM settle)
+    // Update field token counts after a short delay
     setTimeout(async () => {
         if (!popupElement || !popupState?.pipeline.character) return;
 
@@ -494,7 +704,7 @@ function initStageConfigListeners(): void {
                 promptPresetId: null,
             });
             updateTokenEstimate();
-            updateStageConfigUI();  // Already exists in scope, handles everything
+            updateStageConfigUI();
         }
 
         if (textarea.id === `${MODULE_NAME}_custom_schema` && popupState) {
@@ -502,7 +712,7 @@ function initStageConfigListeners(): void {
                 customSchema: textarea.value,
                 schemaPresetId: null,
             });
-            updateStageConfigUI();  // Same here
+            updateStageConfigUI();
         }
     }, 300));
 
@@ -535,7 +745,6 @@ function initStageConfigListeners(): void {
             if (promptTextarea) {
                 const result = await handleSavePromptPreset(popupState.activeStageView, promptTextarea.value);
                 if (result.success && result.presetId) {
-                    // Select the newly saved preset and clear custom
                     popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, popupState.activeStageView, {
                         promptPresetId: result.presetId,
                         customPrompt: '',
@@ -553,10 +762,27 @@ function initStageConfigListeners(): void {
             if (schemaTextarea) {
                 const result = await handleSaveSchemaPreset(popupState.activeStageView, schemaTextarea.value);
                 if (result.success && result.presetId) {
-                    // Select the newly saved preset and clear custom
                     popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, popupState.activeStageView, {
                         schemaPresetId: result.presetId,
                         customSchema: '',
+                    });
+                    updateStageConfigUI();
+                }
+            }
+            return;
+        }
+
+        // Generate schema button
+        const generateBtn = target.closest(`#${MODULE_NAME}_generate_schema_btn`);
+        if (generateBtn && popupState) {
+            const generated = await handleGenerateSchema();
+            if (generated) {
+                const schemaTextarea = popupElement?.querySelector(`#${MODULE_NAME}_custom_schema`) as HTMLTextAreaElement;
+                if (schemaTextarea) {
+                    schemaTextarea.value = generated;
+                    popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, popupState.activeStageView, {
+                        customSchema: generated,
+                        schemaPresetId: null,
                     });
                     updateStageConfigUI();
                 }
@@ -582,7 +808,6 @@ function initStageConfigListeners(): void {
                 const fixed = handleFixSchema(schemaTextarea.value);
                 if (fixed) {
                     schemaTextarea.value = fixed;
-                    // Update state
                     popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, popupState.activeStageView, {
                         customSchema: fixed,
                         schemaPresetId: null,
@@ -601,7 +826,6 @@ function initStageConfigListeners(): void {
                 const formatted = handleFormatSchema(schemaTextarea.value);
                 if (formatted) {
                     schemaTextarea.value = formatted;
-                    // Update state
                     popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, popupState.activeStageView, {
                         customSchema: formatted,
                         schemaPresetId: null,
@@ -687,6 +911,12 @@ function initResultsPanelListeners(): void {
 async function runSingleStage(stage: StageName): Promise<void> {
     if (!popupState || popupState.isGenerating) return;
 
+    // Check API status first
+    if (!isApiReady()) {
+        toastr.error('API is not connected');
+        return;
+    }
+
     const canRun = canRunStage(popupState.pipeline, stage);
     if (!canRun.canRun) {
         toastr.warning(canRun.reason || 'Cannot run this stage');
@@ -740,6 +970,12 @@ async function runSingleStage(stage: StageName): Promise<void> {
 async function runSelectedStages(): Promise<void> {
     if (!popupState || popupState.isGenerating) return;
 
+    // Check API status first
+    if (!isApiReady()) {
+        toastr.error('API is not connected');
+        return;
+    }
+
     const validation = validatePipeline(popupState.pipeline);
     if (!validation.valid) {
         toastr.error(validation.errors.join('\n'));
@@ -753,7 +989,7 @@ async function runSelectedStages(): Promise<void> {
     for (const stage of popupState.pipeline.selectedStages) {
         const status = popupState.pipeline.stageStatus[stage];
         if (status === 'complete' || status === 'skipped') {
-            continue; // Skip already complete/skipped stages
+            continue;
         }
 
         popupState.activeStageView = stage;
@@ -816,7 +1052,7 @@ function updatePipelineNav(): void {
             popupState.pipeline.selectedStages,
             popupState.pipeline.stageStatus,
             popupState.activeStageView,
-            !!popupState.pipeline.character,
+            !!popupState.pipeline.character && isApiReady(),
             popupState.isGenerating,
         );
     }
@@ -901,45 +1137,6 @@ async function updateTokenEstimate(): Promise<void> {
     if (counts.percentage > 100) colorClass = 'danger';
     else if (counts.percentage > 80) colorClass = 'warning';
 
-    // Simple display: just prompt tokens and percentage
     tokenEl.innerHTML = `<i class="fa-solid fa-microchip"></i> ${counts.promptTokens.toLocaleString()}t (${counts.percentage}%)`;
     tokenEl.className = `${MODULE_NAME}_token_estimate ${colorClass}`;
-}
-
-// ============================================================================
-// KEYBOARD SHORTCUTS
-// ============================================================================
-
-let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
-
-function initKeyboardShortcuts(): void {
-    keyboardHandler = (e: KeyboardEvent) => {
-        if (!popupState) return;
-
-        // Ctrl+Enter to run current stage
-        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
-            if (!popupState.isGenerating) {
-                runSingleStage(popupState.activeStageView);
-            }
-        }
-
-        // Escape to cancel
-        if (e.key === 'Escape' && popupState.isGenerating && popupState.abortController) {
-            popupState.abortController.abort();
-        }
-    };
-
-    document.addEventListener('keydown', keyboardHandler);
-}
-
-function removeGlobalListeners(): void {
-    if (keyboardHandler) {
-        document.removeEventListener('keydown', keyboardHandler);
-        keyboardHandler = null;
-    }
-    if (documentClickHandler) {
-        document.removeEventListener('click', documentClickHandler);
-        documentClickHandler = null;
-    }
 }

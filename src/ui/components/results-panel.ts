@@ -34,7 +34,7 @@ export function renderResultsPanel(
 function renderLoading(stage: StageName): string {
     return `
     <div class="${MODULE_NAME}_results_loading">
-      <div class="${MODULE_NAME}_spinner"></div>
+      <i class="fa-solid fa-spinner fa-spin fa-2x"></i>
       <p>Running ${STAGE_LABELS[stage]}...</p>
       <button id="${MODULE_NAME}_cancel_btn" class="menu_button">
         <i class="fa-solid fa-stop"></i>

@@ -1,12 +1,15 @@
 {
-    "display_name": "Template Extension",
-    "loading_order": 1,
-    "requires": [],
-    "optional": [],
-    "js": "dist/index.js",
-    "css": "",
-    "author": "Cohee1207",
-    "version": "1.0.0",
-    "homePage": "https://github.com/SillyTavern/Extension-WebpackTemplate",
-    "auto_update": true
+  "display_name": "Character Tools",
+  "loading_order": 1,
+  "requires": [],
+  "optional": [],
+  "dependencies": [],
+  "js": "dist/index.js",
+  "css": "style.css",
+  "author": "Inktomi",
+  "version": "1.0.0",
+  "homePage": "https://github.com/Inktomi93/SillyTavern-CharacterTools",
+  "auto_update": true,
+  "minimum_client_version": "",
+  "i18n": {}
 }

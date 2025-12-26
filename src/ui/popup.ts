@@ -1397,11 +1397,15 @@ async function runRefinement(): Promise<void> {
         toastr.warning(validation.warnings.join('\n'));
     }
 
+    // IMPORTANT: Capture state for generation BEFORE startRefinement clears analyze
+    const stateForGeneration = popupState.pipeline;
+
     const preRefinementState = {
         iterationCount: popupState.pipeline.iterationCount,
         iterationHistory: [...popupState.pipeline.iterationHistory],
     };
 
+    // Now update UI state (this clears analyze)
     popupState.pipeline = startRefinement(popupState.pipeline);
     popupState.isRefining = true;
     popupState.abortController = new AbortController();
@@ -1415,8 +1419,9 @@ async function runRefinement(): Promise<void> {
     updateIterationHistory();
 
     try {
+        // Use the captured state that still has analyze
         const result = await runRefinementGeneration(
-            popupState.pipeline,
+            stateForGeneration,
             popupState.abortController.signal,
         );
 
@@ -1436,10 +1441,19 @@ async function runRefinement(): Promise<void> {
 
             popupState.activeStageView = 'analyze';
         } else {
+            // Restore previous state on failure
             popupState.pipeline = {
                 ...popupState.pipeline,
                 iterationCount: preRefinementState.iterationCount,
                 iterationHistory: preRefinementState.iterationHistory,
+                results: {
+                    ...popupState.pipeline.results,
+                    analyze: stateForGeneration.results.analyze, // Restore analyze too
+                },
+                stageStatus: {
+                    ...popupState.pipeline.stageStatus,
+                    analyze: 'complete', // Restore status
+                },
             };
 
             if (result.error !== 'Generation cancelled') {
@@ -1447,10 +1461,19 @@ async function runRefinement(): Promise<void> {
             }
         }
     } catch (e) {
+        // Restore on exception too
         popupState.pipeline = {
             ...popupState.pipeline,
             iterationCount: preRefinementState.iterationCount,
             iterationHistory: preRefinementState.iterationHistory,
+            results: {
+                ...popupState.pipeline.results,
+                analyze: stateForGeneration.results.analyze,
+            },
+            stageStatus: {
+                ...popupState.pipeline.stageStatus,
+                analyze: 'complete',
+            },
         };
 
         toastr.error((e as Error).message);

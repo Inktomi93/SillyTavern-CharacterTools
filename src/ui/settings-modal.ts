@@ -193,50 +193,6 @@ function buildSettingsContent(): string {
           </div>
         </details>
 
-        <!-- Per-stage additions (collapsible advanced) -->
-        <details class="${MODULE_NAME}_settings_advanced">
-          <summary>
-            <i class="fa-solid fa-caret-right"></i>
-            Per-Stage Additions (Advanced)
-          </summary>
-          <div class="${MODULE_NAME}_settings_advanced_content">
-            <p class="${MODULE_NAME}_settings_hint">
-              Optional additions appended for specific stages only.
-            </p>
-
-            <div class="${MODULE_NAME}_settings_field">
-              <label>Score Stage</label>
-              <textarea
-                id="${MODULE_NAME}_stage_system_prompt_score"
-                class="text_pole"
-                rows="2"
-                placeholder="Additional instructions for scoring..."
-              >${escapeHtml(settings.stageSystemPrompts?.score || '')}</textarea>
-            </div>
-
-            <div class="${MODULE_NAME}_settings_field">
-              <label>Rewrite Stage</label>
-              <textarea
-                id="${MODULE_NAME}_stage_system_prompt_rewrite"
-                class="text_pole"
-                rows="2"
-                placeholder="Additional instructions for rewriting..."
-              >${escapeHtml(settings.stageSystemPrompts?.rewrite || '')}</textarea>
-            </div>
-
-            <div class="${MODULE_NAME}_settings_field">
-              <label>Analyze Stage</label>
-              <textarea
-                id="${MODULE_NAME}_stage_system_prompt_analyze"
-                class="text_pole"
-                rows="2"
-                placeholder="Additional instructions for analysis..."
-              >${escapeHtml(settings.stageSystemPrompts?.analyze || '')}</textarea>
-            </div>
-          </div>
-        </details>
-      </div>
-
       <!-- Refinement Prompt -->
       <div class="${MODULE_NAME}_settings_section">
         <div class="${MODULE_NAME}_settings_section_header">

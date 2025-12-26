@@ -1,12 +1,13 @@
 // globals.d.ts
 export {};
 
-// Development: absolute path to your ST install
-import '/home/inktomi/SillyTavern/public/global';
-
-// Production paths (uncomment when publishing, comment out dev path above)
-import '../../../../public/global'; // user-scoped
-import '../../../../global'; // server-scoped
+// Try ST's types first (when installed in ST), fall back to local copy
+// @ts-ignore - One of these will resolve
+import '../../../../public/global';
+// @ts-ignore
+import '../../../../global';
+// @ts-ignore - Local fallback for standalone builds
+import './st-types';
 
 // ============================================================================
 // EXTENSIONS TO ST's TYPES
@@ -14,7 +15,6 @@ import '../../../../global'; // server-scoped
 // ============================================================================
 
 declare global {
-  // toastr is loaded by ST but not declared in their global.d.ts
   const toastr: {
     success(message: string, title?: string): void;
     error(message: string, title?: string): void;
@@ -22,7 +22,6 @@ declare global {
     info(message: string, title?: string): void;
   };
 
-  // PresetManager - returned by getPresetManager() but not typed in ST
   interface PresetManager {
     apiId: string;
     getPresetList(api?: string): {
@@ -40,7 +39,6 @@ declare global {
     writePresetExtensionField?(options: { path: string; value: unknown }): Promise<void>;
   }
 
-  // ChatCompletionService - available on context but not fully typed
   interface ChatCompletionRequestOptions {
     stream: boolean;
     messages: Array<{ role: string; content: string }>;
@@ -58,10 +56,9 @@ declare global {
     content: string;
     reasoning?: string;
     error?: unknown;
-    text?: string; // Present in streaming chunks
+    text?: string;
   }
 
-  // Streaming returns a generator function
   type ChatCompletionStreamGenerator = () => AsyncGenerator<ChatCompletionResult>;
 
   interface ChatCompletionService {

@@ -7,6 +7,7 @@ const __dirname =
 
 export default {
     mode: 'production',
+    devtool: 'source-map', // Optional: generates .map file for debugging
     entry: path.join(__dirname, 'src/index.ts'),
     output: {
         path: path.join(__dirname, 'dist/'),

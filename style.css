@@ -68,6 +68,7 @@
   margin: calc(-1 * var(--ct-spacing-lg)) calc(-1 * var(--ct-spacing-lg)) 0;
   padding: var(--ct-spacing-lg);
   padding-bottom: var(--ct-spacing-md);
+  margin-bottom: var(--ct-spacing-md); /* ADD THIS LINE */
 }
 
 .character_tools_popup_title {

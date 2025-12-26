@@ -71,6 +71,9 @@ interface ValidationContext {
 
 const SCHEMA_GENERATION_PROMPT = `Generate a JSON Schema for structured LLM output based on the user's description.
 
+Example input: "rating 1-10, list of issues, summary"
+Example output: {"name": "Analysis", "strict": true, "value": {"type": "object", "additionalProperties": false, "properties": {"rating": {"type": "number"}, "issues": {"type": "array", "items": {"type": "string"}}, "summary": {"type": "string"}}, "required": ["rating", "issues", "summary"]}}
+
 Requirements:
 - Output ONLY valid JSON, no markdown, no explanation
 - Use this exact wrapper format: {"name": "SchemaName", "strict": true, "value": {...}}

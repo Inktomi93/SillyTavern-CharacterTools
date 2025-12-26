@@ -171,6 +171,13 @@
   display: none;
 }
 
+.character_tools_icon_btn:focus-visible,
+.character_tools_popup .menu_button:focus-visible,
+.character_tools_stage_btn:focus-visible {
+  outline: 2px solid var(--SmartThemeQuoteColor);
+  outline-offset: 2px;
+}
+
 /* ============================================================================
    MENU BUTTON OVERRIDES - Ensure theme consistency
    ============================================================================ */

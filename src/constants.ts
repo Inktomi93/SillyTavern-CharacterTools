@@ -578,23 +578,3 @@ export const DEBOUNCE_DELAY = {
 export const MAX_DROPDOWN_RESULTS = 10;
 export const MAX_DEBUG_LOG_ENTRIES = 100;
 export const MAX_ITERATION_HISTORY = 20;  // Don't keep more than this many snapshots
-
-// ============================================================================
-// CSS CLASS PREFIX
-// ============================================================================
-
-// All CSS classes should use this prefix
-export const CSS_PREFIX = 'character_tools';
-
-// Helper to generate prefixed class names
-export function css(...names: string[]): string {
-    return names.map(n => `${CSS_PREFIX}_${n}`).join(' ');
-}
-
-// Helper for BEM-style classes
-export function bem(block: string, element?: string, modifier?: string): string {
-    let className = `${CSS_PREFIX}_${block}`;
-    if (element) className += `__${element}`;
-    if (modifier) className += `--${modifier}`;
-    return className;
-}

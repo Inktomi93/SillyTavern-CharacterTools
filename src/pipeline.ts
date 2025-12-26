@@ -899,8 +899,9 @@ export async function applyRewriteToCharacter(
 
         return { success: true, updatedFields };
     } catch (e) {
+        const message = e instanceof TypeError ? 'Network error - check your connection' : (e as Error).message;
         logError('Error applying rewrite to character', e);
-        return { success: false, error: (e as Error).message, updatedFields: [] };
+        return { success: false, error: message, updatedFields: [] };
     }
 }
 

@@ -51,19 +51,11 @@ export function debugLog(type: DebugLogType, label: string, data: unknown): void
         return;
     }
 
-    // Other types only log if debug mode is on
+    // Other types only log if debug mode is on, and use console.debug
+    // so users can filter them out in browser devtools
     if (isDebugMode()) {
         const prefix = `[${MODULE_NAME}:${type.toUpperCase()}]`;
-        switch (type) {
-            case 'request':
-            case 'response':
-                console.debug(prefix, label, data);
-                break;
-            case 'state':
-            case 'info':
-            default:
-                console.log(prefix, label, data);
-        }
+        console.debug(prefix, label, data);
     }
 }
 

@@ -3,7 +3,7 @@
 // Main popup controller - orchestrates all components and manages state.
 
 import { MODULE_NAME, STAGES, STAGE_LABELS, STAGE_ICONS } from '../constants';
-import { debugLog } from '../debug';
+import { debugLog, logError } from '../debug';
 import {
     createPipelineState,
     resetPipeline,
@@ -312,7 +312,15 @@ export async function openMainPopup(): Promise<void> {
         debouncedFunctions: [],
     };
 
-    const content = buildPopupContent();
+    let content: string;
+    try {
+        content = buildPopupContent();
+    } catch (e) {
+        logError('Failed to build popup content', e);
+        toastr.error('Failed to open Character Tools. Check console for details.');
+        popupState = null;
+        return;
+    }
 
     const popup = new Popup(DOMPurify.sanitize(content), POPUP_TYPE.TEXT, '', {
         wide: true,
@@ -328,7 +336,7 @@ export async function openMainPopup(): Promise<void> {
         }
         popupState = null;
         popupElement = null;
-        characterSelectInitialized = false; // Reset on close too
+        characterSelectInitialized = false;
         unsubscribeEvents();
         removeGlobalListeners();
         clearTokenCache();
@@ -339,18 +347,30 @@ export async function openMainPopup(): Promise<void> {
 
     popupElement = document.getElementById(`${MODULE_NAME}_popup`);
 
-    subscribeEvents();
-    initGlobalListeners();
+    if (!popupElement) {
+        logError('Popup element not found after creation', null);
+        toastr.error('Failed to initialize Character Tools popup.');
+        popupState = null;
+        return;
+    }
 
-    // Get fresh characters from context
-    const { characters } = SillyTavern.getContext();
-    const charList = characters as Character[];
+    try {
+        subscribeEvents();
+        initGlobalListeners();
 
-    initComponents(charList);
-    updateAllComponents();
+        const { characters } = SillyTavern.getContext();
+        const charList = characters as Character[];
 
-    debugLog('info', 'Popup opened', { characterCount: charList.length });
+        initComponents(charList);
+        updateAllComponents();
+
+        debugLog('info', 'Popup opened', { characterCount: charList.length });
+    } catch (e) {
+        logError('Failed to initialize popup components', e);
+        toastr.error('Character Tools opened but some features may not work.');
+    }
 }
+
 
 // ============================================================================
 // POPUP HTML

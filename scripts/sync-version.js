@@ -1,12 +1,20 @@
 import { readFileSync, writeFileSync } from 'fs';
+import process from 'process';
 
 const manifest = JSON.parse(readFileSync('manifest.json', 'utf8'));
 const version = manifest.version;
 
 // Sync to constants.ts
-let constants = readFileSync('src/constants.ts', 'utf8');
-constants = constants.replace(/VERSION = '[^']+'/, `VERSION = '${version}'`);
-writeFileSync('src/constants.ts', constants);
+const constants = readFileSync('src/constants.ts', 'utf8');
+const versionPattern = /^export const VERSION = '[^']+'/m;
+
+if (!versionPattern.test(constants)) {
+    console.error('Failed to find VERSION in constants.ts - pattern not found');
+    process.exit(1);
+}
+
+const newConstants = constants.replace(versionPattern, `export const VERSION = '${version}'`);
+writeFileSync('src/constants.ts', newConstants);
 
 // Sync to package.json
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));

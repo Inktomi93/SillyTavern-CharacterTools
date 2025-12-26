@@ -295,6 +295,9 @@ export async function openMainPopup(): Promise<void> {
     const { Popup, POPUP_TYPE } = SillyTavern.getContext();
     const { DOMPurify } = SillyTavern.libs;
 
+    // Reset initialization flags for fresh popup
+    characterSelectInitialized = false;
+
     popupState = {
         pipeline: createPipelineState(),
         isGenerating: false,
@@ -321,6 +324,7 @@ export async function openMainPopup(): Promise<void> {
         }
         popupState = null;
         popupElement = null;
+        characterSelectInitialized = false; // Reset on close too
         unsubscribeEvents();
         removeGlobalListeners();
         clearTokenCache();
@@ -525,8 +529,16 @@ function checkForDeletedPresetReferences(): void {
 // CHARACTER SELECT LISTENERS
 // ============================================================================
 
+let characterSelectInitialized = false;
+
 function initCharacterSelectListeners(): void {
     if (!popupElement || !popupState) return;
+
+    // Guard against multiple initializations
+    if (characterSelectInitialized) {
+        debugLog('info', 'Character select listeners already initialized, skipping', null);
+        return;
+    }
 
     const { Fuse, lodash } = SillyTavern.libs;
 
@@ -537,6 +549,8 @@ function initCharacterSelectListeners(): void {
     const dropdown = container.querySelector(`#${MODULE_NAME}_char_dropdown`) as HTMLElement;
 
     if (!searchInput || !dropdown) return;
+
+    characterSelectInitialized = true;
 
     let selectedIndex = -1;
     let currentResults: Array<{ char: Character; index: number }> = [];

@@ -12,14 +12,25 @@ import type { Character, IterationSnapshot } from './types';
 // ============================================================================
 
 /**
+ * Simple hash function for strings (djb2 algorithm)
+ */
+function hashString(str: string): string {
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
+    }
+    // Convert to unsigned 32-bit and then to base36 for compact representation
+    return (hash >>> 0).toString(36);
+}
+
+/**
  * Generate a unique key for a character.
- * Uses avatar + name since avatar alone isn't unique.
+ * Uses hash of avatar + name to avoid collisions from sanitization.
  */
 export function getCharacterKey(character: Character): string {
-    // Sanitize for storage key - remove special chars
-    const sanitizedName = character.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const sanitizedAvatar = character.avatar.replace(/[^a-zA-Z0-9_-]/g, '_');
-    return `${MODULE_NAME}_history_${sanitizedAvatar}_${sanitizedName}`;
+    // Hash the raw values to preserve uniqueness before sanitization destroys it
+    const uniqueHash = hashString(`${character.avatar}::${character.name}`);
+    return `${MODULE_NAME}_history_${uniqueHash}`;
 }
 
 // ============================================================================
@@ -79,9 +90,9 @@ export async function loadIterationHistory(
             return null;
         }
 
-        // Verify it's for the same character (in case of key collision)
+        // Verify it's for the same character (belt and suspenders with the hash)
         if (data.characterName !== character.name || data.characterAvatar !== character.avatar) {
-            debugLog('info', 'Iteration history key collision, ignoring', {
+            debugLog('info', 'Iteration history mismatch, ignoring', {
                 key,
                 storedName: data.characterName,
                 currentName: character.name,

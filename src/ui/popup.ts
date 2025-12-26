@@ -9,6 +9,7 @@ import {
     resetPipeline,
     setCharacter,
     toggleStage,
+    setSelectedStages,
     updateStageConfig as pipelineUpdateStageConfig,
     startStage,
     completeStage,
@@ -798,6 +799,7 @@ function initPipelineNavListeners(): void {
             if (stage && popupState) {
                 popupState.pipeline = toggleStage(popupState.pipeline, stage);
                 updatePipelineNav();
+                updateResultsPanel();  // ADDED: Update footer actions when stages change
             }
         }
     });
@@ -1061,6 +1063,7 @@ function initResultsPanelListeners(): void {
                 updateStageSection();
                 updateResultsPanel();
                 updateTokenEstimate();
+                updatePipelineNav();  // ADDED: Update nav to show new active stage
             }
         }
 
@@ -1363,8 +1366,9 @@ async function runSelectedStages(): Promise<void> {
 async function runAllStages(): Promise<void> {
     if (!popupState) return;
 
-    popupState.pipeline.selectedStages = [...STAGES];
+    popupState.pipeline = setSelectedStages(popupState.pipeline, [...STAGES]);
     updatePipelineNav();
+    updateResultsPanel();  // ADD - footer options depend on selected stages
 
     await runSelectedStages();
 }

@@ -2,9 +2,13 @@
 //
 // Handles LLM generation for pipeline stages and refinement.
 // Supports both ST's current settings and custom API configuration.
+//
+// NOTE: Abort/cancel only works between API calls, not during active streaming.
+// Once a streaming request starts, it will complete or error - the abort signal
+// is checked before starting and after completion, but cannot interrupt mid-stream.
 
 import { getSettings } from './settings';
-import { debugLog } from './debug';
+import { debugLog, logError } from './debug';
 import type {
     StructuredOutputSchema,
     GenerationResult,
@@ -54,7 +58,10 @@ export function getApiInfo(): { source: string; model: string; isReady: boolean 
 // ============================================================================
 
 /**
- * Run generation for a pipeline stage
+ * Run generation for a pipeline stage.
+ *
+ * NOTE: The abort signal is checked before and after generation, but cannot
+ * interrupt an active streaming request mid-stream.
  */
 export async function runStageGeneration(
     state: PipelineState,
@@ -74,7 +81,7 @@ export async function runStageGeneration(
     }
 
     if (!isApiReady()) {
-        debugLog('error', 'API not ready', { onlineStatus: context.onlineStatus });
+        logError('API not ready', { onlineStatus: context.onlineStatus });
         return { success: false, error: 'API is not connected. Check your connection settings.' };
     }
 
@@ -104,17 +111,27 @@ export async function runStageGeneration(
         promptLength: processedPrompt.length,
     });
 
-    return await executeGeneration(
+    const result = await executeGeneration(
         settings.systemPrompt,
         processedPrompt,
         jsonSchema,
         signal,
         settings.useCurrentSettings,
     );
+
+    // If structured output was requested, validate the response
+    if (result.success && jsonSchema) {
+        return validateStructuredResponse(result.response, jsonSchema);
+    }
+
+    return result;
 }
 
 /**
- * Run refinement generation
+ * Run refinement generation.
+ *
+ * NOTE: The abort signal is checked before and after generation, but cannot
+ * interrupt an active streaming request mid-stream.
  */
 export async function runRefinementGeneration(
     state: PipelineState,
@@ -137,7 +154,7 @@ export async function runRefinementGeneration(
     }
 
     if (!isApiReady()) {
-        debugLog('error', 'API not ready', { onlineStatus: context.onlineStatus });
+        logError('API not ready', { onlineStatus: context.onlineStatus });
         return { success: false, error: 'API is not connected. Check your connection settings.' };
     }
 
@@ -168,6 +185,58 @@ export async function runRefinementGeneration(
         signal,
         settings.useCurrentSettings,
     );
+}
+
+/**
+ * Validate structured response and fall back gracefully if parsing fails
+ */
+function validateStructuredResponse(
+    response: string,
+    schema: StructuredOutputSchema,
+): GenerationResult {
+    try {
+        const parsed = JSON.parse(response);
+
+        // Basic structure validation - check required fields exist
+        if (schema.value.required && Array.isArray(schema.value.required)) {
+            const missing = schema.value.required.filter(
+                field => !(field in parsed),
+            );
+
+            if (missing.length > 0) {
+                debugLog('info', 'Structured response missing required fields, returning as unstructured', {
+                    missing,
+                    schemaName: schema.name,
+                });
+                // Return as unstructured rather than failing
+                return {
+                    success: true,
+                    response,
+                    isStructured: false,
+                };
+            }
+        }
+
+        // Valid structured response
+        return {
+            success: true,
+            response,
+            isStructured: true,
+        };
+    } catch (e) {
+        debugLog('info', 'Failed to parse structured response, returning as unstructured', {
+            error: (e as Error).message,
+            schemaName: schema.name,
+            responsePreview: response.substring(0, 200),
+        });
+
+        // Fall back to unstructured rather than failing
+        return {
+            success: true,
+            response,
+            isStructured: false,
+        };
+    }
 }
 
 /**
@@ -205,7 +274,7 @@ async function executeGeneration(
         }
 
         if (!response || response.trim() === '') {
-            debugLog('error', 'Empty response', null);
+            logError('Empty response', null);
             return { success: false, error: 'Empty response from API' };
         }
 
@@ -226,7 +295,7 @@ async function executeGeneration(
             return { success: false, error: 'Generation cancelled' };
         }
 
-        debugLog('error', 'Generation exception', {
+        logError('Generation exception', {
             message: err instanceof Error ? err.message : String(err),
         });
 
@@ -350,7 +419,7 @@ async function generateWithCustomSettings(
         const resultObj = result as Record<string, unknown>;
 
         if (resultObj.error) {
-            debugLog('error', 'API returned error', result);
+            logError('API returned error', result);
             throw new Error(`API error: ${JSON.stringify(result)}`);
         }
 
@@ -401,7 +470,7 @@ async function consumeStreamGenerator(
             throw err;
         }
 
-        debugLog('error', 'Stream consumption error', {
+        logError('Stream consumption error', {
             error: err,
             textSoFar: finalText.length,
         });
@@ -451,7 +520,7 @@ export async function getStageTokenCount(
             percentage,
         };
     } catch (e) {
-        debugLog('error', 'Token count failed', e);
+        logError('Token count failed', e);
         return null;
     }
 }
@@ -481,7 +550,7 @@ export async function getRefinementTokenCount(
             percentage,
         };
     } catch (e) {
-        debugLog('error', 'Refinement token count failed', e);
+        logError('Refinement token count failed', e);
         return null;
     }
 }
@@ -507,8 +576,8 @@ function ensureString(value: unknown): string {
 }
 
 /**
- * Replace {{char}} and {{user}} placeholders with actual names
- * This is needed because we're not in a chat context where ST auto-substitutes
+ * Replace {{char}} and {{user}} placeholders with actual names.
+ * This is needed because we're not in a chat context where ST auto-substitutes.
  */
 function substituteCharacterPlaceholders(
     text: string,

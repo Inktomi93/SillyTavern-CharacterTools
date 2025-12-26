@@ -11,15 +11,28 @@ import type { IterationSnapshot, IterationVerdict } from '../../types';
 
 /**
  * Render the iteration history panel
+ * @param history - Array of iteration snapshots
+ * @param currentIteration - Current iteration number
+ * @param historyLoaded - Whether history has been loaded from persistence
  */
 export function renderIterationHistory(
     history: IterationSnapshot[],
     currentIteration: number,
-    onRevert: (index: number) => void,
+    historyLoaded: boolean,
 ): string {
     if (history.length === 0 && currentIteration === 0) {
         return '';
     }
+
+    // Show loading state while history is being loaded from localforage
+    const listContent = !historyLoaded
+        ? `<div class="${MODULE_NAME}_iteration_loading">
+             <i class="fa-solid fa-spinner fa-spin"></i>
+             <span>Loading history...</span>
+           </div>`
+        : history.length === 0
+            ? `<div class="${MODULE_NAME}_iteration_empty">No previous iterations</div>`
+            : history.map((snap, i) => renderIterationItem(snap, i)).join('');
 
     return `
     <div class="${MODULE_NAME}_iteration_history" id="${MODULE_NAME}_iteration_history">
@@ -29,16 +42,13 @@ export function renderIterationHistory(
         <span class="${MODULE_NAME}_iteration_count">${currentIteration > 0 ? `Current: #${currentIteration + 1}` : 'Initial'}</span>
       </div>
       <div class="${MODULE_NAME}_iteration_list">
-        ${history.length === 0
-        ? `<div class="${MODULE_NAME}_iteration_empty">No previous iterations</div>`
-        : history.map((snap, i) => renderIterationItem(snap, i, history.length)).join('')
-}
+        ${listContent}
       </div>
     </div>
   `;
 }
 
-function renderIterationItem(snap: IterationSnapshot, index: number, total: number): string {
+function renderIterationItem(snap: IterationSnapshot, index: number): string {
     const verdictIcon = getVerdictIcon(snap.verdict);
     const verdictClass = getVerdictClass(snap.verdict);
     const time = new Date(snap.timestamp).toLocaleTimeString();
@@ -111,12 +121,13 @@ export function updateIterationHistoryState(
     container: HTMLElement,
     history: IterationSnapshot[],
     currentIteration: number,
+    historyLoaded: boolean,
 ): void {
     const historyEl = container.querySelector(`#${MODULE_NAME}_iteration_history`);
 
     if (!historyEl && (history.length > 0 || currentIteration > 0)) {
         // Need to add history panel
-        const html = renderIterationHistory(history, currentIteration, () => {});
+        const html = renderIterationHistory(history, currentIteration, historyLoaded);
         container.insertAdjacentHTML('beforeend', html);
     } else if (historyEl) {
         // Update existing
@@ -127,10 +138,15 @@ export function updateIterationHistoryState(
 
         const listEl = historyEl.querySelector(`.${MODULE_NAME}_iteration_list`);
         if (listEl) {
-            if (history.length === 0) {
+            if (!historyLoaded) {
+                listEl.innerHTML = `<div class="${MODULE_NAME}_iteration_loading">
+                    <i class="fa-solid fa-spinner fa-spin"></i>
+                    <span>Loading history...</span>
+                </div>`;
+            } else if (history.length === 0) {
                 listEl.innerHTML = `<div class="${MODULE_NAME}_iteration_empty">No previous iterations</div>`;
             } else {
-                listEl.innerHTML = history.map((snap, i) => renderIterationItem(snap, i, history.length)).join('');
+                listEl.innerHTML = history.map((snap, i) => renderIterationItem(snap, i)).join('');
             }
         }
     }
@@ -140,6 +156,8 @@ export function updateIterationHistoryState(
  * Render iteration view modal content
  */
 export function renderIterationViewContent(snap: IterationSnapshot): string {
+    const { moment } = SillyTavern.libs;
+
     return `
     <div class="${MODULE_NAME}_iteration_view">
       <div class="${MODULE_NAME}_iteration_view_header">
@@ -148,7 +166,7 @@ export function renderIterationViewContent(snap: IterationSnapshot): string {
           <i class="fa-solid ${getVerdictIcon(snap.verdict)}"></i>
           ${formatVerdict(snap.verdict)}
         </span>
-        <span class="${MODULE_NAME}_iteration_time">${new Date(snap.timestamp).toLocaleString()}</span>
+        <span class="${MODULE_NAME}_iteration_time">${moment(snap.timestamp).format('YYYY-MM-DD HH:mm:ss')}</span>
       </div>
 
       <div class="${MODULE_NAME}_iteration_view_section">

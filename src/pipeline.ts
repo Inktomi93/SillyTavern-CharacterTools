@@ -14,11 +14,13 @@ import type {
     StructuredOutputSchema,
     IterationSnapshot,
     IterationVerdict,
+    ParsedRewrite,
+    ParsedRewriteField,
 } from './types';
 import { STAGES, CHARACTER_FIELDS, MAX_ITERATION_HISTORY } from './constants';
-import { createStageConfigFromDefaults, resolvePrompt, resolveSchema, processPromptTemplate } from './presets';
+import { createStageConfigFromDefaults, resolvePrompt, resolveSchema, processPromptTemplate, promptHasPlaceholders } from './presets';
 import { getSettings } from './settings';
-import { debugLog } from './debug';
+import { debugLog, logError } from './debug';
 
 // ============================================================================
 // PIPELINE STATE FACTORY
@@ -516,7 +518,7 @@ export function startRefinement(state: PipelineState): PipelineState {
     const snapshot = createIterationSnapshot(state);
 
     if (!snapshot) {
-        debugLog('error', 'Cannot start refinement - missing rewrite or analyze', null);
+        logError('Cannot start refinement - missing rewrite or analyze', null);
         return state;
     }
 
@@ -588,7 +590,7 @@ export function completeRefinement(
  */
 export function revertToIteration(state: PipelineState, iterationIndex: number): PipelineState {
     if (iterationIndex < 0 || iterationIndex >= state.iterationHistory.length) {
-        debugLog('error', 'Invalid iteration index', { iterationIndex, historyLength: state.iterationHistory.length });
+        logError('Invalid iteration index', { iterationIndex, historyLength: state.iterationHistory.length });
         return state;
     }
 
@@ -648,6 +650,258 @@ export function acceptRewrite(state: PipelineState): PipelineState {
         },
         isRefining: false,
     };
+}
+
+// ============================================================================
+// REWRITE PARSING
+// ============================================================================
+
+/**
+ * Parse a rewrite response into field key/value pairs.
+ * Supports multiple formats with fallback chain:
+ * 1. JSON object with field keys
+ * 2. Markdown headers (### Field Name)
+ * 3. Heuristic field detection
+ * 4. Raw content as single field
+ */
+export function parseRewriteResponse(response: string): ParsedRewrite {
+    // Try JSON first
+    const jsonResult = tryParseAsJson(response);
+    if (jsonResult) {
+        return jsonResult;
+    }
+
+    // Try markdown headers
+    const markdownResult = tryParseAsMarkdown(response);
+    if (markdownResult) {
+        return markdownResult;
+    }
+
+    // Try heuristic detection
+    const heuristicResult = tryParseWithHeuristics(response);
+    if (heuristicResult) {
+        return heuristicResult;
+    }
+
+    // Fallback: return raw content
+    return {
+        fields: [{
+            key: 'content',
+            label: 'Content',
+            value: response.trim(),
+        }],
+        raw: response,
+        parseMethod: 'raw',
+    };
+}
+
+function tryParseAsJson(response: string): ParsedRewrite | null {
+    try {
+        // Try direct parse
+        let parsed: Record<string, unknown>;
+        try {
+            parsed = JSON.parse(response);
+        } catch {
+            // Try extracting from code block
+            const codeBlockMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
+            if (!codeBlockMatch) return null;
+            parsed = JSON.parse(codeBlockMatch[1].trim());
+        }
+
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+            return null;
+        }
+
+        const fields: ParsedRewriteField[] = [];
+
+        for (const [key, value] of Object.entries(parsed)) {
+            if (typeof value === 'string' && value.trim()) {
+                const fieldDef = CHARACTER_FIELDS.find(f =>
+                    f.key === key || f.label.toLowerCase() === key.toLowerCase(),
+                );
+
+                fields.push({
+                    key: fieldDef?.key || key,
+                    label: fieldDef?.label || formatFieldLabel(key),
+                    value: value.trim(),
+                });
+            }
+        }
+
+        if (fields.length === 0) return null;
+
+        return {
+            fields,
+            raw: response,
+            parseMethod: 'json',
+        };
+    } catch {
+        return null;
+    }
+}
+
+function tryParseAsMarkdown(response: string): ParsedRewrite | null {
+    // Match ### Header or ## Header patterns
+    const headerPattern = /^#{2,3}\s+(.+?)$/gm;
+    const matches = [...response.matchAll(headerPattern)];
+
+    if (matches.length === 0) return null;
+
+    const fields: ParsedRewriteField[] = [];
+
+    for (let i = 0; i < matches.length; i++) {
+        const match = matches[i];
+        const headerText = match[1].trim();
+        const startIndex = match.index! + match[0].length;
+        const endIndex = matches[i + 1]?.index ?? response.length;
+        const content = response.slice(startIndex, endIndex).trim();
+
+        if (!content) continue;
+
+        // Try to match header to known field
+        const fieldDef = CHARACTER_FIELDS.find(f =>
+            f.label.toLowerCase() === headerText.toLowerCase() ||
+            f.key === headerText.toLowerCase().replace(/\s+/g, '_'),
+        );
+
+        // Skip non-character fields like "Summary" or "Notes"
+        const skipHeaders = ['summary', 'notes', 'changes', 'revised', 'original'];
+        if (!fieldDef && skipHeaders.some(s => headerText.toLowerCase().includes(s))) {
+            continue;
+        }
+
+        fields.push({
+            key: fieldDef?.key || headerText.toLowerCase().replace(/\s+/g, '_'),
+            label: fieldDef?.label || headerText,
+            value: content,
+        });
+    }
+
+    if (fields.length === 0) return null;
+
+    return {
+        fields,
+        raw: response,
+        parseMethod: 'markdown',
+    };
+}
+
+function tryParseWithHeuristics(response: string): ParsedRewrite | null {
+    const fields: ParsedRewriteField[] = [];
+
+    // Look for patterns like "Description:" or "**Description:**"
+    for (const fieldDef of CHARACTER_FIELDS) {
+        const patterns = [
+            new RegExp(`\\*\\*${fieldDef.label}:\\*\\*\\s*([\\s\\S]*?)(?=\\*\\*[A-Z]|$)`, 'i'),
+            new RegExp(`${fieldDef.label}:\\s*([\\s\\S]*?)(?=\\n[A-Z][a-z]+:|$)`, 'i'),
+            new RegExp(`\\[${fieldDef.label}\\]\\s*([\\s\\S]*?)(?=\\[[A-Z]|$)`, 'i'),
+        ];
+
+        for (const pattern of patterns) {
+            const match = response.match(pattern);
+            if (match && match[1].trim()) {
+                fields.push({
+                    key: fieldDef.key,
+                    label: fieldDef.label,
+                    value: match[1].trim(),
+                });
+                break;
+            }
+        }
+    }
+
+    if (fields.length === 0) return null;
+
+    return {
+        fields,
+        raw: response,
+        parseMethod: 'heuristic',
+    };
+}
+
+function formatFieldLabel(key: string): string {
+    return key
+        .replace(/_/g, ' ')
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// ============================================================================
+// APPLY REWRITE TO CHARACTER
+// ============================================================================
+
+/**
+ * Apply parsed rewrite fields to a character.
+ * Returns the updated character data or null on failure.
+ */
+export async function applyRewriteToCharacter(
+    state: PipelineState,
+    parsedFields: ParsedRewriteField[],
+): Promise<{ success: boolean; error?: string; updatedFields: string[] }> {
+    if (!state.character || state.characterIndex === null) {
+        return { success: false, error: 'No character selected', updatedFields: [] };
+    }
+
+    const { characters, unshallowCharacter, getRequestHeaders } = SillyTavern.getContext();
+
+    try {
+        // Ensure character data is fully loaded
+        await unshallowCharacter(state.characterIndex);
+
+        // Get fresh character reference after unshallow
+        const charList = characters as Character[];
+        const character = charList[state.characterIndex];
+
+        if (!character) {
+            return { success: false, error: 'Character not found after unshallow', updatedFields: [] };
+        }
+
+        // Build update object
+        const updates: Partial<Character> = {};
+        const updatedFields: string[] = [];
+
+        for (const field of parsedFields) {
+            // Only update known character fields
+            const fieldDef = CHARACTER_FIELDS.find(f => f.key === field.key);
+            if (fieldDef && field.value.trim()) {
+                (updates as Record<string, string>)[field.key] = field.value.trim();
+                updatedFields.push(field.label);
+            }
+        }
+
+        if (updatedFields.length === 0) {
+            return { success: false, error: 'No valid fields to update', updatedFields: [] };
+        }
+
+        // Apply updates to character object
+        Object.assign(character, updates);
+
+        // Save to server
+        const saveResponse = await fetch('/api/characters/edit', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({
+                avatar_url: character.avatar,
+                ...character,
+            }),
+        });
+
+        if (!saveResponse.ok) {
+            const errorText = await saveResponse.text();
+            logError('Failed to save character', { status: saveResponse.status, error: errorText });
+            return { success: false, error: `Save failed: ${saveResponse.status}`, updatedFields: [] };
+        }
+
+        debugLog('info', 'Character updated successfully', {
+            name: character.name,
+            updatedFields,
+        });
+
+        return { success: true, updatedFields };
+    } catch (e) {
+        logError('Error applying rewrite to character', e);
+        return { success: false, error: (e as Error).message, updatedFields: [] };
+    }
 }
 
 // ============================================================================
@@ -713,6 +967,7 @@ export function canExport(state: PipelineState): boolean {
 
 /**
  * Build the complete prompt for a stage, including template substitution.
+ * If no placeholders are detected, prepends character data automatically.
  */
 export function buildStagePrompt(state: PipelineState, stage: StageName): string | null {
     if (!state.character) {
@@ -744,27 +999,29 @@ export function buildStagePrompt(state: PipelineState, stage: StageName): string
     };
 
     // Check which placeholders are used in the prompt
-    const promptLower = basePrompt.toLowerCase();
-    const usesCharacterPlaceholder = promptLower.includes('{{original_character}}');
-    const usesScorePlaceholder = promptLower.includes('{{score_results}}');
-    const usesRewritePlaceholder = promptLower.includes('{{rewrite_results}}');
+    const foundPlaceholders = promptHasPlaceholders(basePrompt);
+    const hasAnyPlaceholder = foundPlaceholders.length > 0;
 
     // Process template placeholders in the prompt
     const processedPrompt = processPromptTemplate(basePrompt, context);
 
-    // If ALL relevant placeholders are used, just return the processed prompt
-    const allPlaceholdersUsed = checkAllPlaceholdersUsed(stage, usesCharacterPlaceholder, usesScorePlaceholder, usesRewritePlaceholder, state);
+    // If prompt has placeholders, trust that user knows what they're doing
+    if (hasAnyPlaceholder) {
+        // But still check if critical data is missing
+        const usesCharacterPlaceholder = foundPlaceholders.includes('ORIGINAL_CHARACTER');
 
-    if (allPlaceholdersUsed) {
-        return processedPrompt;
+        // If they use character placeholder, just return processed prompt
+        if (usesCharacterPlaceholder) {
+            return processedPrompt;
+        }
+
+        // If they use other placeholders but not character, prepend character data
+        return buildStructuredPrompt(stage, state, characterSummary, processedPrompt);
     }
 
-    // Otherwise, build a structured prompt with all relevant data
-    return buildStructuredPrompt(stage, state, characterSummary, processedPrompt, {
-        usesCharacterPlaceholder,
-        usesScorePlaceholder,
-        usesRewritePlaceholder,
-    });
+    // No placeholders detected - prepend all relevant data automatically
+    debugLog('info', 'No placeholders in prompt, auto-prepending character data', { stage });
+    return buildStructuredPrompt(stage, state, characterSummary, processedPrompt);
 }
 
 /**
@@ -796,39 +1053,6 @@ export function buildRefinementPrompt(state: PipelineState): string | null {
 }
 
 /**
- * Check if all relevant placeholders for a stage are used
- */
-function checkAllPlaceholdersUsed(
-    stage: StageName,
-    usesCharacter: boolean,
-    usesScore: boolean,
-    usesRewrite: boolean,
-    state: PipelineState,
-): boolean {
-    switch (stage) {
-        case 'score':
-            // Score only needs character
-            return usesCharacter;
-
-        case 'rewrite':
-            // Rewrite needs character, and score if available
-            if (!usesCharacter) return false;
-            if (state.results.score && !usesScore) return false;
-            return true;
-
-        case 'analyze':
-            // Analyze needs character, rewrite, and score if available
-            if (!usesCharacter) return false;
-            if (state.results.rewrite && !usesRewrite) return false;
-            if (state.results.score && !usesScore) return false;
-            return true;
-
-        default:
-            return false;
-    }
-}
-
-/**
  * Build a structured prompt with all relevant data prepended
  */
 function buildStructuredPrompt(
@@ -836,15 +1060,12 @@ function buildStructuredPrompt(
     state: PipelineState,
     characterSummary: string,
     instructions: string,
-    usedPlaceholders: { usesCharacterPlaceholder: boolean; usesScorePlaceholder: boolean; usesRewritePlaceholder: boolean },
 ): string {
     const parts: string[] = [];
 
-    // Always include character if not already in prompt via placeholder
-    if (!usedPlaceholders.usesCharacterPlaceholder) {
-        const stageAction = stage === 'score' ? 'Analyze' : stage === 'rewrite' ? 'Rewrite' : 'Compare';
-        parts.push(`# Character to ${stageAction}`, '', characterSummary);
-    }
+    // Always include character
+    const stageAction = stage === 'score' ? 'Analyze' : stage === 'rewrite' ? 'Rewrite' : 'Compare';
+    parts.push(`# Character to ${stageAction}`, '', characterSummary);
 
     // Stage-specific data
     switch (stage) {
@@ -853,20 +1074,20 @@ function buildStructuredPrompt(
             break;
 
         case 'rewrite':
-            // Include score results if available and not already in prompt
-            if (state.results.score?.response && !usedPlaceholders.usesScorePlaceholder) {
+            // Include score results if available
+            if (state.results.score?.response) {
                 parts.push('', '---', '', '# Score Feedback', '', 'Use this feedback to guide your rewrite:', '', state.results.score.response);
             }
             break;
 
         case 'analyze':
-            // Include rewrite results if available and not already in prompt
-            if (state.results.rewrite?.response && !usedPlaceholders.usesRewritePlaceholder) {
+            // Include rewrite results
+            if (state.results.rewrite?.response) {
                 parts.push('', '---', '', '# Rewritten Version', '', 'Compare this against the original:', '', state.results.rewrite.response);
             }
 
-            // Include score results if available and not already in prompt
-            if (state.results.score?.response && !usedPlaceholders.usesScorePlaceholder) {
+            // Include score results if available
+            if (state.results.score?.response) {
                 parts.push('', '---', '', '# Original Score Feedback', '', 'Reference for what was identified as needing improvement:', '', state.results.score.response);
             }
             break;
@@ -977,18 +1198,18 @@ export function setExportData(state: PipelineState): PipelineState {
  * Get a summary of pipeline state for debugging/display
  */
 export function getPipelineSummary(state: PipelineState): {
-  hasCharacter: boolean;
-  characterName: string | null;
-  selectedStages: StageName[];
-  stageStatuses: Record<StageName, StageStatus>;
-  completedStages: StageName[];
-  lockedStages: StageName[];
-  currentStage: StageName | null;
-  canExport: boolean;
-  isComplete: boolean;
-  iterationCount: number;
-  isRefining: boolean;
-  lastVerdict: IterationVerdict | null;
+    hasCharacter: boolean;
+    characterName: string | null;
+    selectedStages: StageName[];
+    stageStatuses: Record<StageName, StageStatus>;
+    completedStages: StageName[];
+    lockedStages: StageName[];
+    currentStage: StageName | null;
+    canExport: boolean;
+    isComplete: boolean;
+    iterationCount: number;
+    isRefining: boolean;
+    lastVerdict: IterationVerdict | null;
 } {
     const completedStages = STAGES.filter(s => state.stageStatus[s] === 'complete');
     const lockedStages = STAGES.filter(s => state.results[s]?.locked);
@@ -1042,9 +1263,9 @@ export function getStageResult(state: PipelineState, stage: StageName): StageRes
  * Validate pipeline state before running
  */
 export interface PipelineValidation {
-  valid: boolean;
-  errors: string[];
-  warnings: string[];
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
 }
 
 export function validatePipeline(state: PipelineState): PipelineValidation {
@@ -1185,7 +1406,7 @@ export function deserializePipelineState(
             exportData: data.exportData as string | null,
         };
     } catch (e) {
-        debugLog('error', 'Failed to deserialize pipeline state', e);
+        logError('Failed to deserialize pipeline state', e);
         return null;
     }
 }

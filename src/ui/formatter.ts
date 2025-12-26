@@ -64,7 +64,7 @@ export function parseStructuredResponse(response: string): unknown | null {
     try {
         return JSON.parse(response);
     } catch {
-    // Try to extract JSON from markdown code blocks
+        // Try to extract JSON from markdown code blocks
         const codeBlockMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
         if (codeBlockMatch) {
             try {

@@ -3,8 +3,25 @@
 // Character search and preview component
 
 import { MODULE_NAME } from '../../constants';
-import { getPopulatedFields } from '../../character';
+import { getPopulatedFields } from '../../pipeline';
 import type { Character, PopulatedField } from '../../types';
+
+// ============================================================================
+// TOKEN CACHE
+// ============================================================================
+
+const tokenCache = new Map<string, number>();
+
+function getTokenCacheKey(content: string): string {
+    // Simple hash for cache key
+    let hash = 0;
+    for (let i = 0; i < content.length; i++) {
+        const char = content.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+    }
+    return `${hash}_${content.length}`;
+}
 
 // ============================================================================
 // RENDER
@@ -133,21 +150,43 @@ export function updateCharacterSelectState(
 }
 
 /**
- * Update token counts for character fields and total
+ * Update token counts for character fields and total.
+ * Uses parallel execution and caching for performance.
  */
 export async function updateFieldTokenCounts(container: HTMLElement, fields: PopulatedField[]): Promise<void> {
     const { getTokenCountAsync } = SillyTavern.getContext();
 
+    // Build array of promises for parallel execution
+    const tokenPromises = fields.map(async (field) => {
+        const cacheKey = getTokenCacheKey(field.value);
+
+        // Check cache first
+        if (tokenCache.has(cacheKey)) {
+            return { field, tokens: tokenCache.get(cacheKey)! };
+        }
+
+        try {
+            const tokens = await getTokenCountAsync(field.value);
+            tokenCache.set(cacheKey, tokens);
+            return { field, tokens };
+        } catch {
+            return { field, tokens: null };
+        }
+    });
+
+    // Execute all in parallel
+    const results = await Promise.all(tokenPromises);
+
+    // Update UI with results
     let totalTokens = 0;
 
-    for (const field of fields) {
+    for (const { field, tokens } of results) {
         const tokenSpan = container.querySelector(`.${MODULE_NAME}_field_tokens[data-field="${field.key}"]`);
         if (tokenSpan) {
-            try {
-                const tokens = await getTokenCountAsync(field.value);
+            if (tokens !== null) {
                 totalTokens += tokens;
                 tokenSpan.textContent = `${tokens.toLocaleString()}t`;
-            } catch {
+            } else {
                 tokenSpan.textContent = '?';
             }
         }
@@ -190,6 +229,12 @@ export function renderDropdownItems(
       </div>
     `;
     }).join('');
+
+    // Scroll selected item into view
+    if (selectedIndex >= 0) {
+        const selectedItem = dropdown.querySelector(`.${MODULE_NAME}_dropdown_item.selected`);
+        selectedItem?.scrollIntoView({ block: 'nearest' });
+    }
 }
 
 // ============================================================================

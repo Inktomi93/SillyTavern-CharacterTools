@@ -102,14 +102,13 @@ function renderResult(stage: StageName, result: StageResult): string {
           ${result.locked ? `<span class="${MODULE_NAME}_badge ${MODULE_NAME}_badge_locked"><i class="fa-solid fa-lock"></i> Locked</span>` : ''}
         </div>
         <div class="${MODULE_NAME}_results_actions">
-          ${result.locked
-        ? `<button id="${MODULE_NAME}_unlock_btn" class="${MODULE_NAME}_icon_btn" title="Unlock for editing">
-                <i class="fa-solid fa-lock-open"></i>
-              </button>`
-        : `<button id="${MODULE_NAME}_lock_btn" class="${MODULE_NAME}_icon_btn" title="Lock result">
-                <i class="fa-solid fa-lock"></i>
-              </button>`
-}
+          <!-- Always render BOTH buttons, use hidden class based on locked state -->
+          <button id="${MODULE_NAME}_lock_btn" class="${MODULE_NAME}_icon_btn ${result.locked ? 'hidden' : ''}" title="Lock result">
+            <i class="fa-solid fa-lock"></i>
+          </button>
+          <button id="${MODULE_NAME}_unlock_btn" class="${MODULE_NAME}_icon_btn ${result.locked ? '' : 'hidden'}" title="Unlock for editing">
+            <i class="fa-solid fa-lock-open"></i>
+          </button>
           <button id="${MODULE_NAME}_copy_btn" class="${MODULE_NAME}_icon_btn" title="Copy to clipboard">
             <i class="fa-solid fa-copy"></i>
           </button>
@@ -198,16 +197,13 @@ export function updateResultsPanelState(
         footer.innerHTML = renderFooterActions(stage, result, nextStage, pipeline);
     }
 
-    // Update lock button state
+    // Update lock/unlock button visibility
     const lockBtn = container.querySelector(`#${MODULE_NAME}_lock_btn`);
     const unlockBtn = container.querySelector(`#${MODULE_NAME}_unlock_btn`);
 
-    if (result?.locked) {
-        lockBtn?.classList.add('hidden');
-        unlockBtn?.classList.remove('hidden');
-    } else {
-        lockBtn?.classList.remove('hidden');
-        unlockBtn?.classList.add('hidden');
+    if (lockBtn && unlockBtn) {
+        lockBtn.classList.toggle('hidden', !!result?.locked);
+        unlockBtn.classList.toggle('hidden', !result?.locked);
     }
 }
 
@@ -230,6 +226,16 @@ function renderFooterActions(
     }
 
     // Stage-specific actions
+    if (stage === 'rewrite' && pipeline.character) {
+        // Apply to Character button - the primary action for rewrite stage
+        actions.push(`
+      <button id="${MODULE_NAME}_apply_btn" class="menu_button ${MODULE_NAME}_apply_btn">
+        <i class="fa-solid fa-check-double"></i>
+        <span>Apply to Character</span>
+      </button>
+    `);
+    }
+
     if (stage === 'analyze') {
         const verdict = extractVerdict(result.response);
         const canRefineResult = canRefine(pipeline);

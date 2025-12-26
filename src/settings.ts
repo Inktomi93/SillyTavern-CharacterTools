@@ -23,6 +23,63 @@ import type {
 import { debugLog } from './debug';
 
 // ============================================================================
+// MIGRATION REGISTRY
+// ============================================================================
+
+type MigrationFn = (settings: Partial<Settings>) => void;
+
+const migrations: Record<number, MigrationFn> = {
+    // v1 -> v2: Add preset system, stage defaults
+    2: (settings) => {
+        // Handle old useRawMode -> useCurrentSettings
+        const oldSettings = settings as Record<string, unknown>;
+        if (oldSettings.useRawMode !== undefined) {
+            settings.useCurrentSettings = !oldSettings.useRawMode;
+            delete oldSettings.useRawMode;
+        }
+
+        // Handle old jsonSchema -> discard (can't migrate custom schemas reliably)
+        if (oldSettings.jsonSchema !== undefined) {
+            delete oldSettings.jsonSchema;
+        }
+
+        // Handle old useStructuredOutput -> apply to score stage
+        if (oldSettings.useStructuredOutput !== undefined) {
+            if (!settings.stageDefaults) {
+                settings.stageDefaults = structuredClone(DEFAULT_STAGE_DEFAULTS);
+            }
+            settings.stageDefaults!.score.useStructuredOutput = !!oldSettings.useStructuredOutput;
+            delete oldSettings.useStructuredOutput;
+        }
+    },
+
+    // v2 -> v3: Add refinement prompt
+    3: (settings) => {
+        if (!settings.refinementPrompt) {
+            settings.refinementPrompt = DEFAULT_REFINEMENT_PROMPT;
+        }
+    },
+};
+
+/**
+ * Run all migrations from oldVersion to current version
+ */
+function runMigrations(settings: Partial<Settings>, oldVersion: number): boolean {
+    let migrated = false;
+
+    for (let v = oldVersion + 1; v <= SETTINGS_VERSION; v++) {
+        const migration = migrations[v];
+        if (migration) {
+            debugLog('info', `Running migration to v${v}`, null);
+            migration(settings);
+            migrated = true;
+        }
+    }
+
+    return migrated;
+}
+
+// ============================================================================
 // SETTINGS ACCESS
 // ============================================================================
 
@@ -32,6 +89,7 @@ import { debugLog } from './debug';
  */
 export function getSettings(): Settings {
     const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
+    const { lodash } = SillyTavern.libs;
 
     if (!extensionSettings[MODULE_NAME]) {
         debugLog('info', 'Initializing settings with defaults', null);
@@ -40,167 +98,59 @@ export function getSettings(): Settings {
         return extensionSettings[MODULE_NAME] as Settings;
     }
 
-    const settings = extensionSettings[MODULE_NAME] as Settings;
+    const existing = extensionSettings[MODULE_NAME] as Partial<Settings>;
+    const oldVersion = existing.settingsVersion || 1;
     let needsSave = false;
 
-    // Run migrations if version is old or missing
-    if (!settings.settingsVersion || settings.settingsVersion < SETTINGS_VERSION) {
-        needsSave = migrateSettings(settings);
+    // Run migrations if version is old
+    if (oldVersion < SETTINGS_VERSION) {
+        needsSave = runMigrations(existing, oldVersion);
+        existing.settingsVersion = SETTINGS_VERSION;
     }
 
-    // Ensure all required fields exist (defensive)
-    needsSave = ensureSettingsIntegrity(settings) || needsSave;
+    // Merge with defaults to ensure all fields exist
+    // lodash.merge does deep merge, existing values override defaults
+    const merged = lodash.merge(
+        structuredClone(DEFAULT_SETTINGS),
+        existing,
+    ) as Settings;
+
+    // Ensure builtin presets exist (they might be missing if user has old settings)
+    const builtinsAdded = ensureBuiltinPresets(merged);
+    needsSave = needsSave || builtinsAdded;
+
+    // Write back merged settings
+    extensionSettings[MODULE_NAME] = merged;
 
     if (needsSave) {
         saveSettingsDebounced();
     }
 
-    return settings;
+    return merged;
 }
 
 /**
- * Migrate settings from older versions
+ * Ensure all builtin presets exist in settings
  */
-function migrateSettings(settings: Settings): boolean {
-    const oldVersion = settings.settingsVersion || 1;
-    debugLog('info', 'Migrating settings', { from: oldVersion, to: SETTINGS_VERSION });
-
-    let migrated = false;
-
-    // v1 -> v2: Add preset system, stage defaults
-    if (oldVersion < 2) {
-        // Migrate from old flat structure to new preset-based structure
-
-        // Handle old useRawMode -> useCurrentSettings
-        if ((settings as unknown as { useRawMode?: boolean }).useRawMode !== undefined) {
-            settings.useCurrentSettings = !(settings as unknown as { useRawMode?: boolean }).useRawMode;
-            delete (settings as unknown as { useRawMode?: boolean }).useRawMode;
-        }
-
-        // Handle old jsonSchema -> convert to preset if custom
-        const oldSchema = (settings as unknown as { jsonSchema?: unknown }).jsonSchema;
-        if (oldSchema && typeof oldSchema === 'object') {
-            // User had a custom schema, we'll lose it but that's okay for migration
-            delete (settings as unknown as { jsonSchema?: unknown }).jsonSchema;
-        }
-
-        // Handle old useStructuredOutput
-        const oldUseStructured = (settings as unknown as { useStructuredOutput?: boolean }).useStructuredOutput;
-        if (oldUseStructured !== undefined) {
-            // Apply to score stage default
-            if (!settings.stageDefaults) {
-                settings.stageDefaults = structuredClone(DEFAULT_STAGE_DEFAULTS);
-            }
-            settings.stageDefaults.score.useStructuredOutput = oldUseStructured;
-            delete (settings as unknown as { useStructuredOutput?: boolean }).useStructuredOutput;
-        }
-
-        migrated = true;
-    }
-
-    // v2 -> v3: Add refinement prompt
-    if (oldVersion < 3) {
-        if (!settings.refinementPrompt) {
-            settings.refinementPrompt = DEFAULT_REFINEMENT_PROMPT;
-        }
-
-        // Add new builtin presets for iteration
-        const existingIds = new Set(settings.promptPresets.map(p => p.id));
-        for (const builtin of BUILTIN_PROMPT_PRESETS) {
-            if (!existingIds.has(builtin.id)) {
-                settings.promptPresets.push(structuredClone(builtin));
-            }
-        }
-
-        migrated = true;
-    }
-
-    settings.settingsVersion = SETTINGS_VERSION;
-    return migrated;
-}
-
-/**
- * Ensure all required settings fields exist
- */
-function ensureSettingsIntegrity(settings: Settings): boolean {
+function ensureBuiltinPresets(settings: Settings): boolean {
     let modified = false;
 
-    // Generation config
-    if (!settings.generationConfig) {
-        settings.generationConfig = structuredClone(DEFAULT_GENERATION_CONFIG);
-        modified = true;
-    } else {
-        // Ensure all generation config fields exist
-        const gc = settings.generationConfig;
-        if (gc.frequencyPenalty === undefined) { gc.frequencyPenalty = 0; modified = true; }
-        if (gc.presencePenalty === undefined) { gc.presencePenalty = 0; modified = true; }
-        if (gc.topP === undefined) { gc.topP = 1; modified = true; }
-    }
-
-    // System prompt
-    if (settings.systemPrompt === undefined) {
-        settings.systemPrompt = DEFAULT_SYSTEM_PROMPT;
-        modified = true;
-    }
-
-    // Refinement prompt
-    if (settings.refinementPrompt === undefined) {
-        settings.refinementPrompt = DEFAULT_REFINEMENT_PROMPT;
-        modified = true;
-    }
-
-    // Presets - ensure builtins exist
-    if (!settings.promptPresets) {
-        settings.promptPresets = [...BUILTIN_PROMPT_PRESETS];
-        modified = true;
-    } else {
-        // Ensure all builtins are present (user might have old version)
-        const existingIds = new Set(settings.promptPresets.map(p => p.id));
-        for (const builtin of BUILTIN_PROMPT_PRESETS) {
-            if (!existingIds.has(builtin.id)) {
-                settings.promptPresets.push(structuredClone(builtin));
-                modified = true;
-            }
+    // Ensure prompt presets
+    const existingPromptIds = new Set(settings.promptPresets.map(p => p.id));
+    for (const builtin of BUILTIN_PROMPT_PRESETS) {
+        if (!existingPromptIds.has(builtin.id)) {
+            settings.promptPresets.push(structuredClone(builtin));
+            modified = true;
         }
     }
 
-    if (!settings.schemaPresets) {
-        settings.schemaPresets = [...BUILTIN_SCHEMA_PRESETS];
-        modified = true;
-    } else {
-        const existingIds = new Set(settings.schemaPresets.map(p => p.id));
-        for (const builtin of BUILTIN_SCHEMA_PRESETS) {
-            if (!existingIds.has(builtin.id)) {
-                settings.schemaPresets.push(structuredClone(builtin));
-                modified = true;
-            }
+    // Ensure schema presets
+    const existingSchemaIds = new Set(settings.schemaPresets.map(p => p.id));
+    for (const builtin of BUILTIN_SCHEMA_PRESETS) {
+        if (!existingSchemaIds.has(builtin.id)) {
+            settings.schemaPresets.push(structuredClone(builtin));
+            modified = true;
         }
-    }
-
-    // Stage defaults
-    if (!settings.stageDefaults) {
-        settings.stageDefaults = structuredClone(DEFAULT_STAGE_DEFAULTS);
-        modified = true;
-    } else {
-        // Ensure all stages have defaults
-        for (const stage of ['score', 'rewrite', 'analyze'] as const) {
-            if (!settings.stageDefaults[stage]) {
-                settings.stageDefaults[stage] = structuredClone(DEFAULT_STAGE_DEFAULTS[stage]);
-                modified = true;
-            }
-        }
-    }
-
-    // Debug mode
-    if (settings.debugMode === undefined) {
-        settings.debugMode = false;
-        modified = true;
-    }
-
-    // useCurrentSettings
-    if (settings.useCurrentSettings === undefined) {
-        settings.useCurrentSettings = true;
-        modified = true;
     }
 
     return modified;
@@ -388,18 +338,19 @@ export function updatePromptPreset(id: string, updates: Partial<Omit<PromptPrese
 
 /**
  * Delete a prompt preset (only custom presets)
+ * Returns the deleted preset ID if successful, null otherwise
  */
-export function deletePromptPreset(id: string): boolean {
+export function deletePromptPreset(id: string): string | null {
     const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
     const settings = extensionSettings[MODULE_NAME] as Settings;
 
     const index = settings.promptPresets.findIndex(p => p.id === id);
-    if (index === -1) return false;
+    if (index === -1) return null;
 
     const preset = settings.promptPresets[index];
     if (preset.isBuiltin) {
         debugLog('error', 'Cannot delete builtin preset', { id });
-        return false;
+        return null;
     }
 
     settings.promptPresets.splice(index, 1);
@@ -413,7 +364,7 @@ export function deletePromptPreset(id: string): boolean {
 
     saveSettingsDebounced();
     debugLog('info', 'Prompt preset deleted', { id });
-    return true;
+    return id;
 }
 
 /**
@@ -501,18 +452,19 @@ export function updateSchemaPreset(id: string, updates: Partial<Omit<SchemaPrese
 
 /**
  * Delete a schema preset (only custom presets)
+ * Returns the deleted preset ID if successful, null otherwise
  */
-export function deleteSchemaPreset(id: string): boolean {
+export function deleteSchemaPreset(id: string): string | null {
     const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
     const settings = extensionSettings[MODULE_NAME] as Settings;
 
     const index = settings.schemaPresets.findIndex(p => p.id === id);
-    if (index === -1) return false;
+    if (index === -1) return null;
 
     const preset = settings.schemaPresets[index];
     if (preset.isBuiltin) {
         debugLog('error', 'Cannot delete builtin preset', { id });
-        return false;
+        return null;
     }
 
     settings.schemaPresets.splice(index, 1);
@@ -526,7 +478,7 @@ export function deleteSchemaPreset(id: string): boolean {
 
     saveSettingsDebounced();
     debugLog('info', 'Schema preset deleted', { id });
-    return true;
+    return id;
 }
 
 // ============================================================================

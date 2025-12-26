@@ -64,6 +64,7 @@ export async function openSettingsModal(onClose?: () => void): Promise<void> {
 function buildSettingsContent(): string {
     const settings = getSettings();
     const config = settings.generationConfig;
+    const { moment } = SillyTavern.libs;
 
     return `
     <div class="${MODULE_NAME}_settings_modal" id="${MODULE_NAME}_settings_modal">
@@ -209,6 +210,25 @@ function buildSettingsContent(): string {
         </div>
       </div>
 
+      <!-- Keyboard Shortcuts -->
+      <div class="${MODULE_NAME}_settings_section">
+        <div class="${MODULE_NAME}_settings_section_header">
+          <i class="fa-solid fa-keyboard"></i>
+          <span>Keyboard Shortcuts</span>
+        </div>
+
+        <div class="${MODULE_NAME}_shortcuts_list">
+          <div class="${MODULE_NAME}_shortcut_item">
+            <kbd>Ctrl</kbd> + <kbd>Enter</kbd>
+            <span>Run current stage</span>
+          </div>
+          <div class="${MODULE_NAME}_shortcut_item">
+            <kbd>Escape</kbd>
+            <span>Cancel generation</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Debug -->
       <div class="${MODULE_NAME}_settings_section">
         <div class="${MODULE_NAME}_settings_section_header">
@@ -246,6 +266,11 @@ function buildSettingsContent(): string {
           <div id="${MODULE_NAME}_debug_log_list" class="${MODULE_NAME}_debug_log_list"></div>
           <pre id="${MODULE_NAME}_debug_log_detail" class="${MODULE_NAME}_debug_log_detail">Select a log entry</pre>
         </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="${MODULE_NAME}_settings_footer">
+        <span class="${MODULE_NAME}_settings_version">v1.0.0 • Last updated: ${moment().format('YYYY-MM-DD HH:mm:ss')}</span>
       </div>
     </div>
   `;
@@ -438,9 +463,9 @@ function initSettingsListeners(): void {
 }
 
 function handleDeletePreset(type: 'prompt' | 'schema', id: string): void {
-    const success = type === 'prompt' ? deletePromptPreset(id) : deleteSchemaPreset(id);
+    const deletedId = type === 'prompt' ? deletePromptPreset(id) : deleteSchemaPreset(id);
 
-    if (success) {
+    if (deletedId) {
         toastr.success('Preset deleted');
         refreshPresetLists();
     } else {

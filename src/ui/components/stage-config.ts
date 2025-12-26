@@ -192,7 +192,10 @@ export function renderStageConfig(
 // ============================================================================
 // UPDATE STATE
 // ============================================================================
-// Export this new handler
+
+/**
+ * Handle schema generation from description
+ */
 export async function handleGenerateSchema(): Promise<string | null> {
     const { Popup, POPUP_RESULT } = SillyTavern.getContext();
 
@@ -206,21 +209,47 @@ export async function handleGenerateSchema(): Promise<string | null> {
         return null;
     }
 
-    toastr.info('Generating schema...');
+    // Show loading overlay
+    showSchemaGenerationLoading(true);
 
-    const result = await generateSchemaFromDescription(description);
+    try {
+        toastr.info('Generating schema...');
 
-    if (result.success) {
-        toastr.success('Schema generated!');
-        return result.schema!;
-    } else {
-        toastr.error(result.error || 'Generation failed');
-        // Return the broken schema anyway so they can see/fix it
-        return result.schema || null;
+        const result = await generateSchemaFromDescription(description);
+
+        if (result.success) {
+            toastr.success('Schema generated!');
+            return result.schema!;
+        } else {
+            toastr.error(result.error || 'Generation failed');
+            // Return the broken schema anyway so they can see/fix it
+            return result.schema || null;
+        }
+    } finally {
+        showSchemaGenerationLoading(false);
     }
 }
 
+/**
+ * Show/hide loading overlay for schema generation
+ */
+function showSchemaGenerationLoading(show: boolean): void {
+    const existingOverlay = document.querySelector(`.${MODULE_NAME}_loading_overlay`);
 
+    if (show && !existingOverlay) {
+        const overlay = document.createElement('div');
+        overlay.className = `${MODULE_NAME}_loading_overlay`;
+        overlay.innerHTML = `
+            <div class="${MODULE_NAME}_loading_content">
+                <i class="fa-solid fa-spinner fa-spin fa-2x"></i>
+                <p>Generating schema...</p>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    } else if (!show && existingOverlay) {
+        existingOverlay.remove();
+    }
+}
 
 export function updateStageConfigState(
     container: HTMLElement,
@@ -351,7 +380,7 @@ function updateSchemaActionButtons(container: HTMLElement, schemaContent: string
 // SCHEMA ACTION HANDLERS (called from popup.ts)
 // ============================================================================
 
-export function handleValidateSchema(schemaContent: string): void {
+export async function handleValidateSchema(schemaContent: string): Promise<void> {
     if (!schemaContent.trim()) {
         toastr.warning('No schema to validate');
         return;
@@ -364,13 +393,36 @@ export function handleValidateSchema(schemaContent: string): void {
         return;
     }
 
+    // For warnings/info with more than 2 items, use Popup instead of toastr
+    const { Popup, POPUP_TYPE } = SillyTavern.getContext();
+
     if (validation.warnings?.length) {
-        toastr.warning(`Valid with ${validation.warnings.length} warning(s):\n${validation.warnings.join('\n')}`);
+        if (validation.warnings.length > 2) {
+            const content = `
+                <h3>Schema Valid with Warnings</h3>
+                <ul>
+                    ${validation.warnings.map(w => `<li>${w}</li>`).join('')}
+                </ul>
+            `;
+            await new Popup(content, POPUP_TYPE.TEXT, '', { wide: false }).show();
+        } else {
+            toastr.warning(`Valid with ${validation.warnings.length} warning(s):\n${validation.warnings.join('\n')}`);
+        }
         return;
     }
 
     if (validation.info?.length) {
-        toastr.success(`Valid!\n${validation.info.join('\n')}`);
+        if (validation.info.length > 2) {
+            const content = `
+                <h3>Schema Valid</h3>
+                <ul>
+                    ${validation.info.map(i => `<li>${i}</li>`).join('')}
+                </ul>
+            `;
+            await new Popup(content, POPUP_TYPE.TEXT, '', { wide: false }).show();
+        } else {
+            toastr.success(`Valid!\n${validation.info.join('\n')}`);
+        }
     } else {
         toastr.success('Schema is valid!');
     }

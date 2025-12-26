@@ -109,14 +109,14 @@ export function createStageConfigFromDefaults(stage: StageName): StageConfig {
 // ============================================================================
 
 export interface TemplateContext {
-  originalCharacter?: string;
-  scoreResults?: string;
-  rewriteResults?: string;
-  currentRewrite?: string;
-  currentAnalysis?: string;
-  iterationNumber?: string;
-  charName?: string;
-  userName?: string;
+    originalCharacter?: string;
+    scoreResults?: string;
+    rewriteResults?: string;
+    currentRewrite?: string;
+    currentAnalysis?: string;
+    iterationNumber?: string;
+    charName?: string;
+    userName?: string;
 }
 
 /**
@@ -130,6 +130,8 @@ export interface TemplateContext {
  * 4. Handle conditional blocks {{#if score_results}}...{{/if}}
  */
 export function processPromptTemplate(prompt: string, context: TemplateContext): string {
+    const { lodash } = SillyTavern.libs;
+
     // First, run ST's macro substitution for standard macros
     const { substituteParams } = SillyTavern.getContext();
     let processed = substituteParams(prompt);
@@ -137,45 +139,45 @@ export function processPromptTemplate(prompt: string, context: TemplateContext):
     // Handle conditional blocks first
     processed = processConditionalBlocks(processed, context);
 
-    // Now replace our custom placeholders
+    // Now replace our custom placeholders using lodash.escapeRegExp
     if (context.originalCharacter !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.ORIGINAL_CHARACTER), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.ORIGINAL_CHARACTER), 'gi'),
             context.originalCharacter,
         );
     }
 
     if (context.scoreResults !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.SCORE_RESULTS), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.SCORE_RESULTS), 'gi'),
             context.scoreResults,
         );
     }
 
     if (context.rewriteResults !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.REWRITE_RESULTS), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.REWRITE_RESULTS), 'gi'),
             context.rewriteResults,
         );
     }
 
     if (context.currentRewrite !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.CURRENT_REWRITE), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.CURRENT_REWRITE), 'gi'),
             context.currentRewrite,
         );
     }
 
     if (context.currentAnalysis !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.CURRENT_ANALYSIS), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.CURRENT_ANALYSIS), 'gi'),
             context.currentAnalysis,
         );
     }
 
     if (context.iterationNumber !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.ITERATION_NUMBER), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.ITERATION_NUMBER), 'gi'),
             context.iterationNumber,
         );
     }
@@ -183,7 +185,7 @@ export function processPromptTemplate(prompt: string, context: TemplateContext):
     // Replace {{char_name}} with our specific character
     if (context.charName !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.CHARACTER_NAME), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.CHARACTER_NAME), 'gi'),
             context.charName,
         );
     }
@@ -191,7 +193,7 @@ export function processPromptTemplate(prompt: string, context: TemplateContext):
     // Replace {{user_name}} with our specific user
     if (context.userName !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.USER_NAME), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.USER_NAME), 'gi'),
             context.userName,
         );
     }
@@ -215,7 +217,7 @@ function processConditionalBlocks(prompt: string, context: TemplateContext): str
     // Match {{#if variable}}...{{/if}} blocks
     const conditionalRegex = /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/gi;
 
-    return prompt.replace(conditionalRegex, (match, variable, content) => {
+    return prompt.replace(conditionalRegex, (_match, variable, content) => {
         const varName = variable.toLowerCase();
 
         // Check if the variable has a truthy value
@@ -301,10 +303,10 @@ export function getUnfilledPlaceholders(prompt: string, stage: StageName, hasSco
 // ============================================================================
 
 export interface PresetOption {
-  id: string;
-  name: string;
-  isBuiltin: boolean;
-  isSelected: boolean;
+    id: string;
+    name: string;
+    isBuiltin: boolean;
+    isSelected: boolean;
 }
 
 /**
@@ -373,11 +375,11 @@ export function getSchemaForEditing(config: StageConfig): string {
  * Validate a schema string and return user-friendly result
  */
 export interface SchemaValidationUIResult {
-  isValid: boolean;
-  isEmpty: boolean;
-  errorMessage: string | null;
-  warnings: string[];
-  info: string[];
+    isValid: boolean;
+    isEmpty: boolean;
+    errorMessage: string | null;
+    warnings: string[];
+    info: string[];
 }
 
 export function validateSchemaForUI(schemaJson: string): SchemaValidationUIResult {
@@ -410,9 +412,9 @@ export function validateSchemaForUI(schemaJson: string): SchemaValidationUIResul
  * Validate a prompt preset before saving
  */
 export interface PresetValidationResult {
-  valid: boolean;
-  errors: string[];
-  warnings: string[];
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
 }
 
 export function validatePromptPreset(preset: Partial<PromptPreset>): PresetValidationResult {
@@ -431,10 +433,16 @@ export function validatePromptPreset(preset: Partial<PromptPreset>): PresetValid
         errors.push('Prompt is too long (max 50,000 characters)');
     }
 
-    // Check for common issues
+    // Check for common issues - but don't error if no placeholders
     if (preset.prompt) {
-        if (preset.prompt.includes('{{') && !promptHasPlaceholders(preset.prompt).length) {
-            warnings.push('Prompt contains {{ but no recognized placeholders');
+        const hasDoubleBraces = preset.prompt.includes('{{');
+        const foundPlaceholders = promptHasPlaceholders(preset.prompt);
+
+        if (hasDoubleBraces && foundPlaceholders.length === 0) {
+            // Has {{ but no recognized placeholders - might be intentional (custom macros)
+            debugLog('info', 'Prompt has {{ but no recognized placeholders', {
+                promptPreview: preset.prompt.substring(0, 100),
+            });
         }
     }
 
@@ -484,10 +492,6 @@ export function validateSchemaPreset(preset: Partial<SchemaPreset>): PresetValid
 // ============================================================================
 // UTILITIES
 // ============================================================================
-
-function escapeRegex(string: string): string {
-    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 /**
  * Check if a preset name is unique (for validation)

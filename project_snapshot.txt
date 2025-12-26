@@ -1,5 +1,5 @@
 # PROJECT SNAPSHOT
-Generated: Fri Dec 26 06:57:45 AM MST 2025
+Generated: Fri Dec 26 09:18:23 AM MST 2025
 
 ## DIRECTORY STRUCTURE
 ```
@@ -20,6 +20,7 @@ Generated: Fri Dec 26 06:57:45 AM MST 2025
 │   ├── debug.ts
 │   ├── generator.ts
 │   ├── index.ts
+│   ├── persistence.ts
 │   ├── pipeline.ts
 │   ├── presets.ts
 │   ├── schema.ts
@@ -51,15 +52,20 @@ Generated: Fri Dec 26 06:57:45 AM MST 2025
 
 import { getSettings } from './settings';
 import { initPanel } from './ui/panel';
-import { debugLog } from './debug';
+import { debugLog, logError } from './debug';
 
 function init(): void {
-    debugLog('info', 'Extension initializing', { version: '2.0.0' });
+    try {
+        debugLog('info', 'Extension initializing', { version: '1.0.0' });
 
-    initPanel();
-    registerEventListeners();
+        initPanel();
+        registerEventListeners();
 
-    debugLog('info', 'Extension loaded', getSettings());
+        debugLog('info', 'Extension loaded', getSettings());
+    } catch (error) {
+        logError('Extension initialization failed', error);
+        toastr.error('Character Tools failed to initialize. Check console for details.');
+    }
 }
 
 function registerEventListeners(): void {
@@ -99,31 +105,31 @@ export type StageStatus = 'pending' | 'running' | 'complete' | 'skipped';
 // ============================================================================
 
 export interface Character {
-  name: string;
-  avatar: string;
-  description: string;
-  personality: string;
-  first_mes: string;
-  mes_example: string;
-  scenario: string;
-  system_prompt?: string;
-  post_history_instructions?: string;
-  creator_notes?: string;
-  tags?: string[];
+    name: string;
+    avatar: string;
+    description: string;
+    personality: string;
+    first_mes: string;
+    mes_example: string;
+    scenario: string;
+    system_prompt?: string;
+    post_history_instructions?: string;
+    creator_notes?: string;
+    tags?: string[];
 }
 
 export interface CharacterField {
-  key: keyof Character;
-  label: string;
-  scoreable: boolean;
+    key: keyof Character;
+    label: string;
+    scoreable: boolean;
 }
 
 export interface PopulatedField {
-  key: string;
-  label: string;
-  value: string;
-  charCount: number;
-  scoreable: boolean;
+    key: string;
+    label: string;
+    value: string;
+    charCount: number;
+    scoreable: boolean;
 }
 
 // ============================================================================
@@ -131,58 +137,58 @@ export interface PopulatedField {
 // ============================================================================
 
 export interface GenerationConfig {
-  source: string;
-  model: string;
-  temperature: number;
-  maxTokens: number;
-  frequencyPenalty: number;
-  presencePenalty: number;
-  topP: number;
+    source: string;
+    model: string;
+    temperature: number;
+    maxTokens: number;
+    frequencyPenalty: number;
+    presencePenalty: number;
+    topP: number;
 }
 
 export type GenerationResult =
-  | { success: true; response: string; isStructured: boolean }
-  | { success: false; error: string };
+    | { success: true; response: string; isStructured: boolean }
+    | { success: false; error: string };
 
 // ============================================================================
 // SCHEMA
 // ============================================================================
 
 export interface StructuredOutputSchema {
-  name: string;
-  strict?: boolean;
-  value: JsonSchemaValue;
+    name: string;
+    strict?: boolean;
+    value: JsonSchemaValue;
 }
 
 export interface JsonSchemaValue {
-  $schema?: string;
-  type: string;
-  properties?: Record<string, unknown>;
-  required?: string[];
-  additionalProperties?: boolean;
-  items?: unknown;
-  $defs?: Record<string, JsonSchemaValue>;
-  definitions?: Record<string, JsonSchemaValue>;
-  anyOf?: unknown[];
-  allOf?: unknown[];
-  enum?: unknown[];
-  const?: unknown;
-  format?: string;
-  pattern?: string;
-  description?: string;
-  title?: string;
-  default?: unknown;
-  $ref?: string;
-  minItems?: number;
-  [key: string]: unknown;
+    $schema?: string;
+    type: string;
+    properties?: Record<string, unknown>;
+    required?: string[];
+    additionalProperties?: boolean;
+    items?: unknown;
+    $defs?: Record<string, JsonSchemaValue>;
+    definitions?: Record<string, JsonSchemaValue>;
+    anyOf?: unknown[];
+    allOf?: unknown[];
+    enum?: unknown[];
+    const?: unknown;
+    format?: string;
+    pattern?: string;
+    description?: string;
+    title?: string;
+    default?: unknown;
+    $ref?: string;
+    minItems?: number;
+    [key: string]: unknown;
 }
 
 export interface SchemaValidationResult {
-  valid: boolean;
-  error?: string;
-  warnings?: string[];
-  info?: string[];
-  schema?: StructuredOutputSchema;
+    valid: boolean;
+    error?: string;
+    warnings?: string[];
+    info?: string[];
+    schema?: StructuredOutputSchema;
 }
 
 // ============================================================================
@@ -190,23 +196,23 @@ export interface SchemaValidationResult {
 // ============================================================================
 
 export interface PromptPreset {
-  id: string;
-  name: string;
-  prompt: string;
-  stages: StageName[];  // Empty array = available for all stages
-  isBuiltin: boolean;
-  createdAt: number;
-  updatedAt: number;
+    id: string;
+    name: string;
+    prompt: string;
+    stages: StageName[];  // Empty array = available for all stages
+    isBuiltin: boolean;
+    createdAt: number;
+    updatedAt: number;
 }
 
 export interface SchemaPreset {
-  id: string;
-  name: string;
-  schema: StructuredOutputSchema;
-  stages: StageName[];  // Empty array = available for all stages
-  isBuiltin: boolean;
-  createdAt: number;
-  updatedAt: number;
+    id: string;
+    name: string;
+    schema: StructuredOutputSchema;
+    stages: StageName[];  // Empty array = available for all stages
+    isBuiltin: boolean;
+    createdAt: number;
+    updatedAt: number;
 }
 
 // ============================================================================
@@ -214,19 +220,19 @@ export interface SchemaPreset {
 // ============================================================================
 
 export interface StageDefaults {
-  promptPresetId: string | null;  // null = use customPrompt
-  customPrompt: string;
-  schemaPresetId: string | null;  // null = use customSchema or none
-  customSchema: string;           // JSON string, empty = no schema
-  useStructuredOutput: boolean;
+    promptPresetId: string | null;  // null = use customPrompt
+    customPrompt: string;
+    schemaPresetId: string | null;  // null = use customSchema or none
+    customSchema: string;           // JSON string, empty = no schema
+    useStructuredOutput: boolean;
 }
 
 export interface StageConfig {
-  promptPresetId: string | null;
-  customPrompt: string;
-  schemaPresetId: string | null;
-  customSchema: string;
-  useStructuredOutput: boolean;
+    promptPresetId: string | null;
+    customPrompt: string;
+    schemaPresetId: string | null;
+    customSchema: string;
+    useStructuredOutput: boolean;
 }
 
 // ============================================================================
@@ -236,13 +242,29 @@ export interface StageConfig {
 export type IterationVerdict = 'accept' | 'needs_refinement' | 'regression';
 
 export interface IterationSnapshot {
-  iteration: number;
-  rewriteResponse: string;
-  rewritePreview: string;  // First 200 chars for UI display
-  analysisResponse: string;
-  analysisPreview: string;
-  verdict: IterationVerdict;
-  timestamp: number;
+    iteration: number;
+    rewriteResponse: string;
+    rewritePreview: string;  // First 200 chars for UI display
+    analysisResponse: string;
+    analysisPreview: string;
+    verdict: IterationVerdict;
+    timestamp: number;
+}
+
+// ============================================================================
+// PARSED REWRITE
+// ============================================================================
+
+export interface ParsedRewriteField {
+    key: string;
+    label: string;
+    value: string;
+}
+
+export interface ParsedRewrite {
+    fields: ParsedRewriteField[];
+    raw: string;
+    parseMethod: 'json' | 'markdown' | 'heuristic' | 'raw';
 }
 
 // ============================================================================
@@ -250,45 +272,45 @@ export interface IterationSnapshot {
 // ============================================================================
 
 export interface StageResult {
-  response: string;
-  isStructured: boolean;
-  promptUsed: string;
-  schemaUsed: StructuredOutputSchema | null;
-  timestamp: number;
-  locked: boolean;
+    response: string;
+    isStructured: boolean;
+    promptUsed: string;
+    schemaUsed: StructuredOutputSchema | null;
+    timestamp: number;
+    locked: boolean;
 }
 
 export interface PipelineState {
-  // Selected character
-  character: Character | null;
-  characterIndex: number | null;
+    // Selected character
+    character: Character | null;
+    characterIndex: number | null;
 
-  // Stage results
-  results: {
-    score: StageResult | null;
-    rewrite: StageResult | null;
-    analyze: StageResult | null;
-  };
+    // Stage results
+    results: {
+        score: StageResult | null;
+        rewrite: StageResult | null;
+        analyze: StageResult | null;
+    };
 
-  // Stage configs (runtime, may differ from defaults)
-  configs: {
-    score: StageConfig;
-    rewrite: StageConfig;
-    analyze: StageConfig;
-  };
+    // Stage configs (runtime, may differ from defaults)
+    configs: {
+        score: StageConfig;
+        rewrite: StageConfig;
+        analyze: StageConfig;
+    };
 
-  // Pipeline flow
-  selectedStages: StageName[];
-  currentStage: StageName | null;
-  stageStatus: Record<StageName, StageStatus>;
+    // Pipeline flow
+    selectedStages: StageName[];
+    currentStage: StageName | null;
+    stageStatus: Record<StageName, StageStatus>;
 
-  // Iteration system
-  iterationCount: number;
-  iterationHistory: IterationSnapshot[];
-  isRefining: boolean;  // True when in refinement mode (after first analyze)
+    // Iteration system
+    iterationCount: number;
+    iterationHistory: IterationSnapshot[];
+    isRefining: boolean;  // True when in refinement mode (after first analyze)
 
-  // Export
-  exportData: string | null;
+    // Export
+    exportData: string | null;
 }
 
 // ============================================================================
@@ -296,26 +318,26 @@ export interface PipelineState {
 // ============================================================================
 
 export interface Settings {
-  // Generation settings
-  useCurrentSettings: boolean;
-  generationConfig: GenerationConfig;
-  systemPrompt: string;
+    // Generation settings
+    useCurrentSettings: boolean;
+    generationConfig: GenerationConfig;
+    systemPrompt: string;
 
-  // Presets
-  promptPresets: PromptPreset[];
-  schemaPresets: SchemaPreset[];
+    // Presets
+    promptPresets: PromptPreset[];
+    schemaPresets: SchemaPreset[];
 
-  // Per-stage defaults
-  stageDefaults: Record<StageName, StageDefaults>;
+    // Per-stage defaults
+    stageDefaults: Record<StageName, StageDefaults>;
 
-  // Refinement settings
-  refinementPrompt: string;
+    // Refinement settings
+    refinementPrompt: string;
 
-  // Debug
-  debugMode: boolean;
+    // Debug
+    debugMode: boolean;
 
-  // Version for migrations
-  settingsVersion: number;
+    // Version for migrations
+    settingsVersion: number;
 }
 
 // ============================================================================
@@ -325,10 +347,10 @@ export interface Settings {
 export type DebugLogType = 'request' | 'response' | 'error' | 'info' | 'state';
 
 export interface DebugLogEntry {
-  timestamp: Date;
-  type: DebugLogType;
-  label: string;
-  data: unknown;
+    timestamp: Date;
+    type: DebugLogType;
+    label: string;
+    data: unknown;
 }
 
 // ============================================================================
@@ -336,11 +358,12 @@ export interface DebugLogEntry {
 // ============================================================================
 
 export interface PopupState {
-  isOpen: boolean;
-  isGenerating: boolean;
-  abortController: AbortController | null;
-  activePanel: 'main' | 'settings';
-  expandedFields: Set<string>;  // Character field keys that are expanded
+    isOpen: boolean;
+    isGenerating: boolean;
+    abortController: AbortController | null;
+    activePanel: 'main' | 'settings';
+    expandedFields: Set<string>;  // Character field keys that are expanded
+    historyLoaded: boolean;  // Track if we've loaded persisted iteration history
 }
 
 // ============================================================================
@@ -348,47 +371,47 @@ export interface PopupState {
 // ============================================================================
 
 export interface CharacterSelectProps {
-  characters: Character[];
-  selectedIndex: number | null;
-  onSelect: (char: Character, index: number) => void;
-  onClear: () => void;
+    characters: Character[];
+    selectedIndex: number | null;
+    onSelect: (char: Character, index: number) => void;
+    onClear: () => void;
 }
 
 export interface PipelineNavProps {
-  selectedStages: StageName[];
-  stageStatus: Record<StageName, StageStatus>;
-  currentStage: StageName | null;
-  onToggleStage: (stage: StageName) => void;
-  onSelectStage: (stage: StageName) => void;
-  onRunSelected: () => void;
-  onRunAll: () => void;
-  onReset: () => void;
-  hasCharacter: boolean;
+    selectedStages: StageName[];
+    stageStatus: Record<StageName, StageStatus>;
+    currentStage: StageName | null;
+    onToggleStage: (stage: StageName) => void;
+    onSelectStage: (stage: StageName) => void;
+    onRunSelected: () => void;
+    onRunAll: () => void;
+    onReset: () => void;
+    hasCharacter: boolean;
 }
 
 export interface StageConfigProps {
-  stage: StageName;
-  config: StageConfig;
-  promptPresets: PromptPreset[];
-  schemaPresets: SchemaPreset[];
-  onConfigChange: (config: Partial<StageConfig>) => void;
-  onSavePromptPreset: (name: string) => void;
-  onSaveSchemaPreset: (name: string) => void;
-  tokenEstimate: number | null;
-  contextSize: number;
+    stage: StageName;
+    config: StageConfig;
+    promptPresets: PromptPreset[];
+    schemaPresets: SchemaPreset[];
+    onConfigChange: (config: Partial<StageConfig>) => void;
+    onSavePromptPreset: (name: string) => void;
+    onSaveSchemaPreset: (name: string) => void;
+    tokenEstimate: number | null;
+    contextSize: number;
 }
 
 export interface ResultsPanelProps {
-  stage: StageName;
-  result: StageResult | null;
-  status: StageStatus;
-  onRegenerate: () => void;
-  onLock: () => void;
-  onUnlock: () => void;
-  onContinue: () => void;
-  onCopy: () => void;
-  nextStage: StageName | null;
-  canContinue: boolean;
+    stage: StageName;
+    result: StageResult | null;
+    status: StageStatus;
+    onRegenerate: () => void;
+    onLock: () => void;
+    onUnlock: () => void;
+    onContinue: () => void;
+    onCopy: () => void;
+    nextStage: StageName | null;
+    canContinue: boolean;
 }
 ```
 
@@ -412,7 +435,7 @@ import type {
 
 export const MODULE_NAME = 'character_tools';
 export const EXTENSION_PATH = 'third-party/my-extension';
-export const SETTINGS_VERSION = 3;  // Bump for refinement additions
+export const SETTINGS_VERSION = 3;
 
 // ============================================================================
 // CHARACTER FIELDS
@@ -920,7 +943,31 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
 // TEMPLATE PLACEHOLDERS
 // ============================================================================
 
-// These placeholders can be used in prompts and will be replaced at runtime
+/**
+ * Template placeholders that can be used in prompts.
+ * These are replaced at runtime with actual values.
+ *
+ * @property ORIGINAL_CHARACTER - The full character card being analyzed/rewritten.
+ *           Includes all populated fields formatted as markdown sections.
+ *
+ * @property SCORE_RESULTS - Output from the Score stage. Available in Rewrite and Analyze stages.
+ *           Empty string if Score stage wasn't run.
+ *
+ * @property REWRITE_RESULTS - Output from the Rewrite stage. Available in Analyze stage.
+ *           Empty string if Rewrite stage wasn't run.
+ *
+ * @property CURRENT_REWRITE - Alias for REWRITE_RESULTS, used in refinement context.
+ *
+ * @property CURRENT_ANALYSIS - Output from the Analyze stage. Used in refinement prompts.
+ *           Empty string if Analyze stage wasn't run.
+ *
+ * @property ITERATION_NUMBER - Current refinement iteration number (1-based).
+ *           "1" for first iteration, increments with each refinement cycle.
+ *
+ * @property CHARACTER_NAME - The character's name (e.g., "Luna").
+ *
+ * @property USER_NAME - The user's configured name in SillyTavern.
+ */
 export const TEMPLATE_PLACEHOLDERS = {
     ORIGINAL_CHARACTER: '{{original_character}}',
     SCORE_RESULTS: '{{score_results}}',
@@ -998,6 +1045,63 @@ import type {
 import { debugLog } from './debug';
 
 // ============================================================================
+// MIGRATION REGISTRY
+// ============================================================================
+
+type MigrationFn = (settings: Partial<Settings>) => void;
+
+const migrations: Record<number, MigrationFn> = {
+    // v1 -> v2: Add preset system, stage defaults
+    2: (settings) => {
+        // Handle old useRawMode -> useCurrentSettings
+        const oldSettings = settings as Record<string, unknown>;
+        if (oldSettings.useRawMode !== undefined) {
+            settings.useCurrentSettings = !oldSettings.useRawMode;
+            delete oldSettings.useRawMode;
+        }
+
+        // Handle old jsonSchema -> discard (can't migrate custom schemas reliably)
+        if (oldSettings.jsonSchema !== undefined) {
+            delete oldSettings.jsonSchema;
+        }
+
+        // Handle old useStructuredOutput -> apply to score stage
+        if (oldSettings.useStructuredOutput !== undefined) {
+            if (!settings.stageDefaults) {
+                settings.stageDefaults = structuredClone(DEFAULT_STAGE_DEFAULTS);
+            }
+            settings.stageDefaults!.score.useStructuredOutput = !!oldSettings.useStructuredOutput;
+            delete oldSettings.useStructuredOutput;
+        }
+    },
+
+    // v2 -> v3: Add refinement prompt
+    3: (settings) => {
+        if (!settings.refinementPrompt) {
+            settings.refinementPrompt = DEFAULT_REFINEMENT_PROMPT;
+        }
+    },
+};
+
+/**
+ * Run all migrations from oldVersion to current version
+ */
+function runMigrations(settings: Partial<Settings>, oldVersion: number): boolean {
+    let migrated = false;
+
+    for (let v = oldVersion + 1; v <= SETTINGS_VERSION; v++) {
+        const migration = migrations[v];
+        if (migration) {
+            debugLog('info', `Running migration to v${v}`, null);
+            migration(settings);
+            migrated = true;
+        }
+    }
+
+    return migrated;
+}
+
+// ============================================================================
 // SETTINGS ACCESS
 // ============================================================================
 
@@ -1007,6 +1111,7 @@ import { debugLog } from './debug';
  */
 export function getSettings(): Settings {
     const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
+    const { lodash } = SillyTavern.libs;
 
     if (!extensionSettings[MODULE_NAME]) {
         debugLog('info', 'Initializing settings with defaults', null);
@@ -1015,167 +1120,59 @@ export function getSettings(): Settings {
         return extensionSettings[MODULE_NAME] as Settings;
     }
 
-    const settings = extensionSettings[MODULE_NAME] as Settings;
+    const existing = extensionSettings[MODULE_NAME] as Partial<Settings>;
+    const oldVersion = existing.settingsVersion || 1;
     let needsSave = false;
 
-    // Run migrations if version is old or missing
-    if (!settings.settingsVersion || settings.settingsVersion < SETTINGS_VERSION) {
-        needsSave = migrateSettings(settings);
+    // Run migrations if version is old
+    if (oldVersion < SETTINGS_VERSION) {
+        needsSave = runMigrations(existing, oldVersion);
+        existing.settingsVersion = SETTINGS_VERSION;
     }
 
-    // Ensure all required fields exist (defensive)
-    needsSave = ensureSettingsIntegrity(settings) || needsSave;
+    // Merge with defaults to ensure all fields exist
+    // lodash.merge does deep merge, existing values override defaults
+    const merged = lodash.merge(
+        structuredClone(DEFAULT_SETTINGS),
+        existing,
+    ) as Settings;
+
+    // Ensure builtin presets exist (they might be missing if user has old settings)
+    const builtinsAdded = ensureBuiltinPresets(merged);
+    needsSave = needsSave || builtinsAdded;
+
+    // Write back merged settings
+    extensionSettings[MODULE_NAME] = merged;
 
     if (needsSave) {
         saveSettingsDebounced();
     }
 
-    return settings;
+    return merged;
 }
 
 /**
- * Migrate settings from older versions
+ * Ensure all builtin presets exist in settings
  */
-function migrateSettings(settings: Settings): boolean {
-    const oldVersion = settings.settingsVersion || 1;
-    debugLog('info', 'Migrating settings', { from: oldVersion, to: SETTINGS_VERSION });
-
-    let migrated = false;
-
-    // v1 -> v2: Add preset system, stage defaults
-    if (oldVersion < 2) {
-        // Migrate from old flat structure to new preset-based structure
-
-        // Handle old useRawMode -> useCurrentSettings
-        if ((settings as unknown as { useRawMode?: boolean }).useRawMode !== undefined) {
-            settings.useCurrentSettings = !(settings as unknown as { useRawMode?: boolean }).useRawMode;
-            delete (settings as unknown as { useRawMode?: boolean }).useRawMode;
-        }
-
-        // Handle old jsonSchema -> convert to preset if custom
-        const oldSchema = (settings as unknown as { jsonSchema?: unknown }).jsonSchema;
-        if (oldSchema && typeof oldSchema === 'object') {
-            // User had a custom schema, we'll lose it but that's okay for migration
-            delete (settings as unknown as { jsonSchema?: unknown }).jsonSchema;
-        }
-
-        // Handle old useStructuredOutput
-        const oldUseStructured = (settings as unknown as { useStructuredOutput?: boolean }).useStructuredOutput;
-        if (oldUseStructured !== undefined) {
-            // Apply to score stage default
-            if (!settings.stageDefaults) {
-                settings.stageDefaults = structuredClone(DEFAULT_STAGE_DEFAULTS);
-            }
-            settings.stageDefaults.score.useStructuredOutput = oldUseStructured;
-            delete (settings as unknown as { useStructuredOutput?: boolean }).useStructuredOutput;
-        }
-
-        migrated = true;
-    }
-
-    // v2 -> v3: Add refinement prompt
-    if (oldVersion < 3) {
-        if (!settings.refinementPrompt) {
-            settings.refinementPrompt = DEFAULT_REFINEMENT_PROMPT;
-        }
-
-        // Add new builtin presets for iteration
-        const existingIds = new Set(settings.promptPresets.map(p => p.id));
-        for (const builtin of BUILTIN_PROMPT_PRESETS) {
-            if (!existingIds.has(builtin.id)) {
-                settings.promptPresets.push(structuredClone(builtin));
-            }
-        }
-
-        migrated = true;
-    }
-
-    settings.settingsVersion = SETTINGS_VERSION;
-    return migrated;
-}
-
-/**
- * Ensure all required settings fields exist
- */
-function ensureSettingsIntegrity(settings: Settings): boolean {
+function ensureBuiltinPresets(settings: Settings): boolean {
     let modified = false;
 
-    // Generation config
-    if (!settings.generationConfig) {
-        settings.generationConfig = structuredClone(DEFAULT_GENERATION_CONFIG);
-        modified = true;
-    } else {
-        // Ensure all generation config fields exist
-        const gc = settings.generationConfig;
-        if (gc.frequencyPenalty === undefined) { gc.frequencyPenalty = 0; modified = true; }
-        if (gc.presencePenalty === undefined) { gc.presencePenalty = 0; modified = true; }
-        if (gc.topP === undefined) { gc.topP = 1; modified = true; }
-    }
-
-    // System prompt
-    if (settings.systemPrompt === undefined) {
-        settings.systemPrompt = DEFAULT_SYSTEM_PROMPT;
-        modified = true;
-    }
-
-    // Refinement prompt
-    if (settings.refinementPrompt === undefined) {
-        settings.refinementPrompt = DEFAULT_REFINEMENT_PROMPT;
-        modified = true;
-    }
-
-    // Presets - ensure builtins exist
-    if (!settings.promptPresets) {
-        settings.promptPresets = [...BUILTIN_PROMPT_PRESETS];
-        modified = true;
-    } else {
-        // Ensure all builtins are present (user might have old version)
-        const existingIds = new Set(settings.promptPresets.map(p => p.id));
-        for (const builtin of BUILTIN_PROMPT_PRESETS) {
-            if (!existingIds.has(builtin.id)) {
-                settings.promptPresets.push(structuredClone(builtin));
-                modified = true;
-            }
+    // Ensure prompt presets
+    const existingPromptIds = new Set(settings.promptPresets.map(p => p.id));
+    for (const builtin of BUILTIN_PROMPT_PRESETS) {
+        if (!existingPromptIds.has(builtin.id)) {
+            settings.promptPresets.push(structuredClone(builtin));
+            modified = true;
         }
     }
 
-    if (!settings.schemaPresets) {
-        settings.schemaPresets = [...BUILTIN_SCHEMA_PRESETS];
-        modified = true;
-    } else {
-        const existingIds = new Set(settings.schemaPresets.map(p => p.id));
-        for (const builtin of BUILTIN_SCHEMA_PRESETS) {
-            if (!existingIds.has(builtin.id)) {
-                settings.schemaPresets.push(structuredClone(builtin));
-                modified = true;
-            }
+    // Ensure schema presets
+    const existingSchemaIds = new Set(settings.schemaPresets.map(p => p.id));
+    for (const builtin of BUILTIN_SCHEMA_PRESETS) {
+        if (!existingSchemaIds.has(builtin.id)) {
+            settings.schemaPresets.push(structuredClone(builtin));
+            modified = true;
         }
-    }
-
-    // Stage defaults
-    if (!settings.stageDefaults) {
-        settings.stageDefaults = structuredClone(DEFAULT_STAGE_DEFAULTS);
-        modified = true;
-    } else {
-        // Ensure all stages have defaults
-        for (const stage of ['score', 'rewrite', 'analyze'] as const) {
-            if (!settings.stageDefaults[stage]) {
-                settings.stageDefaults[stage] = structuredClone(DEFAULT_STAGE_DEFAULTS[stage]);
-                modified = true;
-            }
-        }
-    }
-
-    // Debug mode
-    if (settings.debugMode === undefined) {
-        settings.debugMode = false;
-        modified = true;
-    }
-
-    // useCurrentSettings
-    if (settings.useCurrentSettings === undefined) {
-        settings.useCurrentSettings = true;
-        modified = true;
     }
 
     return modified;
@@ -1363,18 +1360,19 @@ export function updatePromptPreset(id: string, updates: Partial<Omit<PromptPrese
 
 /**
  * Delete a prompt preset (only custom presets)
+ * Returns the deleted preset ID if successful, null otherwise
  */
-export function deletePromptPreset(id: string): boolean {
+export function deletePromptPreset(id: string): string | null {
     const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
     const settings = extensionSettings[MODULE_NAME] as Settings;
 
     const index = settings.promptPresets.findIndex(p => p.id === id);
-    if (index === -1) return false;
+    if (index === -1) return null;
 
     const preset = settings.promptPresets[index];
     if (preset.isBuiltin) {
         debugLog('error', 'Cannot delete builtin preset', { id });
-        return false;
+        return null;
     }
 
     settings.promptPresets.splice(index, 1);
@@ -1388,7 +1386,7 @@ export function deletePromptPreset(id: string): boolean {
 
     saveSettingsDebounced();
     debugLog('info', 'Prompt preset deleted', { id });
-    return true;
+    return id;
 }
 
 /**
@@ -1476,18 +1474,19 @@ export function updateSchemaPreset(id: string, updates: Partial<Omit<SchemaPrese
 
 /**
  * Delete a schema preset (only custom presets)
+ * Returns the deleted preset ID if successful, null otherwise
  */
-export function deleteSchemaPreset(id: string): boolean {
+export function deleteSchemaPreset(id: string): string | null {
     const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
     const settings = extensionSettings[MODULE_NAME] as Settings;
 
     const index = settings.schemaPresets.findIndex(p => p.id === id);
-    if (index === -1) return false;
+    if (index === -1) return null;
 
     const preset = settings.schemaPresets[index];
     if (preset.isBuiltin) {
         debugLog('error', 'Cannot delete builtin preset', { id });
-        return false;
+        return null;
     }
 
     settings.schemaPresets.splice(index, 1);
@@ -1501,7 +1500,7 @@ export function deleteSchemaPreset(id: string): boolean {
 
     saveSettingsDebounced();
     debugLog('info', 'Schema preset deleted', { id });
-    return true;
+    return id;
 }
 
 // ============================================================================
@@ -1794,9 +1793,13 @@ export function prepareForSearch(chars: Character[]): Array<{ char: Character; i
 //
 // Handles LLM generation for pipeline stages and refinement.
 // Supports both ST's current settings and custom API configuration.
+//
+// NOTE: Abort/cancel only works between API calls, not during active streaming.
+// Once a streaming request starts, it will complete or error - the abort signal
+// is checked before starting and after completion, but cannot interrupt mid-stream.
 
 import { getSettings } from './settings';
-import { debugLog } from './debug';
+import { debugLog, logError } from './debug';
 import type {
     StructuredOutputSchema,
     GenerationResult,
@@ -1846,7 +1849,10 @@ export function getApiInfo(): { source: string; model: string; isReady: boolean 
 // ============================================================================
 
 /**
- * Run generation for a pipeline stage
+ * Run generation for a pipeline stage.
+ *
+ * NOTE: The abort signal is checked before and after generation, but cannot
+ * interrupt an active streaming request mid-stream.
  */
 export async function runStageGeneration(
     state: PipelineState,
@@ -1866,7 +1872,7 @@ export async function runStageGeneration(
     }
 
     if (!isApiReady()) {
-        debugLog('error', 'API not ready', { onlineStatus: context.onlineStatus });
+        logError('API not ready', { onlineStatus: context.onlineStatus });
         return { success: false, error: 'API is not connected. Check your connection settings.' };
     }
 
@@ -1896,17 +1902,27 @@ export async function runStageGeneration(
         promptLength: processedPrompt.length,
     });
 
-    return await executeGeneration(
+    const result = await executeGeneration(
         settings.systemPrompt,
         processedPrompt,
         jsonSchema,
         signal,
         settings.useCurrentSettings,
     );
+
+    // If structured output was requested, validate the response
+    if (result.success && jsonSchema) {
+        return validateStructuredResponse(result.response, jsonSchema);
+    }
+
+    return result;
 }
 
 /**
- * Run refinement generation
+ * Run refinement generation.
+ *
+ * NOTE: The abort signal is checked before and after generation, but cannot
+ * interrupt an active streaming request mid-stream.
  */
 export async function runRefinementGeneration(
     state: PipelineState,
@@ -1929,7 +1945,7 @@ export async function runRefinementGeneration(
     }
 
     if (!isApiReady()) {
-        debugLog('error', 'API not ready', { onlineStatus: context.onlineStatus });
+        logError('API not ready', { onlineStatus: context.onlineStatus });
         return { success: false, error: 'API is not connected. Check your connection settings.' };
     }
 
@@ -1960,6 +1976,58 @@ export async function runRefinementGeneration(
         signal,
         settings.useCurrentSettings,
     );
+}
+
+/**
+ * Validate structured response and fall back gracefully if parsing fails
+ */
+function validateStructuredResponse(
+    response: string,
+    schema: StructuredOutputSchema,
+): GenerationResult {
+    try {
+        const parsed = JSON.parse(response);
+
+        // Basic structure validation - check required fields exist
+        if (schema.value.required && Array.isArray(schema.value.required)) {
+            const missing = schema.value.required.filter(
+                field => !(field in parsed),
+            );
+
+            if (missing.length > 0) {
+                debugLog('info', 'Structured response missing required fields, returning as unstructured', {
+                    missing,
+                    schemaName: schema.name,
+                });
+                // Return as unstructured rather than failing
+                return {
+                    success: true,
+                    response,
+                    isStructured: false,
+                };
+            }
+        }
+
+        // Valid structured response
+        return {
+            success: true,
+            response,
+            isStructured: true,
+        };
+    } catch (e) {
+        debugLog('info', 'Failed to parse structured response, returning as unstructured', {
+            error: (e as Error).message,
+            schemaName: schema.name,
+            responsePreview: response.substring(0, 200),
+        });
+
+        // Fall back to unstructured rather than failing
+        return {
+            success: true,
+            response,
+            isStructured: false,
+        };
+    }
 }
 
 /**
@@ -1997,7 +2065,7 @@ async function executeGeneration(
         }
 
         if (!response || response.trim() === '') {
-            debugLog('error', 'Empty response', null);
+            logError('Empty response', null);
             return { success: false, error: 'Empty response from API' };
         }
 
@@ -2018,7 +2086,7 @@ async function executeGeneration(
             return { success: false, error: 'Generation cancelled' };
         }
 
-        debugLog('error', 'Generation exception', {
+        logError('Generation exception', {
             message: err instanceof Error ? err.message : String(err),
         });
 
@@ -2142,7 +2210,7 @@ async function generateWithCustomSettings(
         const resultObj = result as Record<string, unknown>;
 
         if (resultObj.error) {
-            debugLog('error', 'API returned error', result);
+            logError('API returned error', result);
             throw new Error(`API error: ${JSON.stringify(result)}`);
         }
 
@@ -2193,7 +2261,7 @@ async function consumeStreamGenerator(
             throw err;
         }
 
-        debugLog('error', 'Stream consumption error', {
+        logError('Stream consumption error', {
             error: err,
             textSoFar: finalText.length,
         });
@@ -2243,7 +2311,7 @@ export async function getStageTokenCount(
             percentage,
         };
     } catch (e) {
-        debugLog('error', 'Token count failed', e);
+        logError('Token count failed', e);
         return null;
     }
 }
@@ -2273,7 +2341,7 @@ export async function getRefinementTokenCount(
             percentage,
         };
     } catch (e) {
-        debugLog('error', 'Refinement token count failed', e);
+        logError('Refinement token count failed', e);
         return null;
     }
 }
@@ -2299,8 +2367,8 @@ function ensureString(value: unknown): string {
 }
 
 /**
- * Replace {{char}} and {{user}} placeholders with actual names
- * This is needed because we're not in a chat context where ST auto-substitutes
+ * Replace {{char}} and {{user}} placeholders with actual names.
+ * This is needed because we're not in a chat context where ST auto-substitutes.
  */
 function substituteCharacterPlaceholders(
     text: string,
@@ -2369,21 +2437,21 @@ const UNSUPPORTED_REGEX_FEATURES = [
 // ============================================================================
 
 interface ValidationContext {
-  errors: string[];
-  warnings: string[];
-  info: string[];
-  stats: {
-    defCount: number;
-    anyOfCount: number;
-    totalAnyOfVariants: number;
-    maxDepth: number;
-    propertyCount: number;
-    optionalFieldCount: number;
-    enumCount: number;
-  };
-  currentDepth: number;
-  seenRefs: Set<string>;
-  defs: Record<string, JsonSchemaValue>;
+    errors: string[];
+    warnings: string[];
+    info: string[];
+    stats: {
+        defCount: number;
+        anyOfCount: number;
+        totalAnyOfVariants: number;
+        maxDepth: number;
+        propertyCount: number;
+        optionalFieldCount: number;
+        enumCount: number;
+    };
+    currentDepth: number;
+    seenRefs: Set<string>;
+    defs: Record<string, JsonSchemaValue>;
 }
 
 const SCHEMA_GENERATION_PROMPT = `Generate a JSON Schema for structured LLM output based on the user's description.
@@ -2401,9 +2469,9 @@ Requirements:
 User's description:`;
 
 export async function generateSchemaFromDescription(description: string): Promise<{
-  success: boolean;
-  schema?: string;
-  error?: string;
+    success: boolean;
+    schema?: string;
+    error?: string;
 }> {
     const { generateRaw } = SillyTavern.getContext();
 
@@ -2810,7 +2878,7 @@ function validateStringNode(node: JsonSchemaValue, path: string, ctx: Validation
     }
 }
 
-function validateNumericNode(node: JsonSchemaValue, path: string, ctx: ValidationContext): void {
+function validateNumericNode(_node: JsonSchemaValue, _path: string, _ctx: ValidationContext): void {
     // All numeric constraints are ignored, already warned above
     // Nothing additional to check
 }
@@ -2824,7 +2892,7 @@ function validateRef(ref: string, path: string, ctx: ValidationContext): void {
 
     // Check for circular refs
     if (ctx.seenRefs.has(ref)) {
-    // Not necessarily an error, but worth noting
+        // Not necessarily an error, but worth noting
         ctx.info.push(`${path}: Circular reference to '${ref}'`);
         return;
     }
@@ -3087,22 +3155,44 @@ export function formatSchema(schema: StructuredOutputSchema | null): string {
 /**
  * Attempts to parse a structured output response.
  * Returns the parsed object or null if parsing fails.
+ * Optionally validates against a schema and returns partial results with warnings.
  */
-export function parseStructuredResponse(response: string): unknown | null {
+export function parseStructuredResponse(
+    response: string,
+    schema?: StructuredOutputSchema,
+): { data: unknown; warnings: string[] } | null {
+    let parsed: unknown;
+
     try {
-        return JSON.parse(response);
+        parsed = JSON.parse(response);
     } catch {
-    // Try to extract JSON from markdown code blocks
+        // Try to extract JSON from markdown code blocks
         const codeBlockMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
         if (codeBlockMatch) {
             try {
-                return JSON.parse(codeBlockMatch[1].trim());
+                parsed = JSON.parse(codeBlockMatch[1].trim());
             } catch {
                 return null;
             }
+        } else {
+            return null;
         }
-        return null;
     }
+
+    const warnings: string[] = [];
+
+    // If schema provided, validate required fields
+    if (schema && schema.value.required && Array.isArray(schema.value.required)) {
+        const missing = schema.value.required.filter(
+            field => !(field in (parsed as Record<string, unknown>)),
+        );
+
+        if (missing.length > 0) {
+            warnings.push(`Missing required fields: ${missing.join(', ')}`);
+        }
+    }
+
+    return { data: parsed, warnings };
 }
 
 /**
@@ -3154,9 +3244,9 @@ export function countOptionalFields(schema: JsonSchemaValue): number {
  * Estimates schema complexity for UI feedback.
  */
 export function estimateSchemaComplexity(schema: StructuredOutputSchema): {
-  level: 'simple' | 'moderate' | 'complex' | 'extreme';
-  score: number;
-  factors: string[];
+    level: 'simple' | 'moderate' | 'complex' | 'extreme';
+    score: number;
+    factors: string[];
 } {
     const factors: string[] = [];
     let score = 0;
@@ -3262,7 +3352,7 @@ export function isDebugMode(): boolean {
     try {
         return getSettings().debugMode;
     } catch {
-    // Settings might not be initialized yet
+        // Settings might not be initialized yet
         return false;
     }
 }
@@ -3284,24 +3374,34 @@ export function debugLog(type: DebugLogType, label: string, data: unknown): void
         logEntries.pop();
     }
 
-    // Only console log if debug mode is on
+    // Errors always log to console regardless of debug mode
+    if (type === 'error') {
+        console.error(`[${MODULE_NAME}:ERROR]`, label, data);
+        return;
+    }
+
+    // Other types only log if debug mode is on
     if (isDebugMode()) {
         const prefix = `[${MODULE_NAME}:${type.toUpperCase()}]`;
         switch (type) {
-            case 'error':
-                console.error(prefix, label, data);
-                break;
             case 'request':
             case 'response':
                 console.debug(prefix, label, data);
                 break;
             case 'state':
-                console.log(prefix, label, data);
-                break;
+            case 'info':
             default:
                 console.log(prefix, label, data);
         }
     }
+}
+
+/**
+ * Log an error - always outputs to console and stores in debug log.
+ * Use this for errors that should never be silently swallowed.
+ */
+export function logError(label: string, data: unknown): void {
+    debugLog('error', label, data);
 }
 
 // ============================================================================
@@ -3439,11 +3539,13 @@ import type {
     StructuredOutputSchema,
     IterationSnapshot,
     IterationVerdict,
+    ParsedRewrite,
+    ParsedRewriteField,
 } from './types';
 import { STAGES, CHARACTER_FIELDS, MAX_ITERATION_HISTORY } from './constants';
-import { createStageConfigFromDefaults, resolvePrompt, resolveSchema, processPromptTemplate } from './presets';
+import { createStageConfigFromDefaults, resolvePrompt, resolveSchema, processPromptTemplate, promptHasPlaceholders } from './presets';
 import { getSettings } from './settings';
-import { debugLog } from './debug';
+import { debugLog, logError } from './debug';
 
 // ============================================================================
 // PIPELINE STATE FACTORY
@@ -3941,7 +4043,7 @@ export function startRefinement(state: PipelineState): PipelineState {
     const snapshot = createIterationSnapshot(state);
 
     if (!snapshot) {
-        debugLog('error', 'Cannot start refinement - missing rewrite or analyze', null);
+        logError('Cannot start refinement - missing rewrite or analyze', null);
         return state;
     }
 
@@ -4013,7 +4115,7 @@ export function completeRefinement(
  */
 export function revertToIteration(state: PipelineState, iterationIndex: number): PipelineState {
     if (iterationIndex < 0 || iterationIndex >= state.iterationHistory.length) {
-        debugLog('error', 'Invalid iteration index', { iterationIndex, historyLength: state.iterationHistory.length });
+        logError('Invalid iteration index', { iterationIndex, historyLength: state.iterationHistory.length });
         return state;
     }
 
@@ -4073,6 +4175,258 @@ export function acceptRewrite(state: PipelineState): PipelineState {
         },
         isRefining: false,
     };
+}
+
+// ============================================================================
+// REWRITE PARSING
+// ============================================================================
+
+/**
+ * Parse a rewrite response into field key/value pairs.
+ * Supports multiple formats with fallback chain:
+ * 1. JSON object with field keys
+ * 2. Markdown headers (### Field Name)
+ * 3. Heuristic field detection
+ * 4. Raw content as single field
+ */
+export function parseRewriteResponse(response: string): ParsedRewrite {
+    // Try JSON first
+    const jsonResult = tryParseAsJson(response);
+    if (jsonResult) {
+        return jsonResult;
+    }
+
+    // Try markdown headers
+    const markdownResult = tryParseAsMarkdown(response);
+    if (markdownResult) {
+        return markdownResult;
+    }
+
+    // Try heuristic detection
+    const heuristicResult = tryParseWithHeuristics(response);
+    if (heuristicResult) {
+        return heuristicResult;
+    }
+
+    // Fallback: return raw content
+    return {
+        fields: [{
+            key: 'content',
+            label: 'Content',
+            value: response.trim(),
+        }],
+        raw: response,
+        parseMethod: 'raw',
+    };
+}
+
+function tryParseAsJson(response: string): ParsedRewrite | null {
+    try {
+        // Try direct parse
+        let parsed: Record<string, unknown>;
+        try {
+            parsed = JSON.parse(response);
+        } catch {
+            // Try extracting from code block
+            const codeBlockMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
+            if (!codeBlockMatch) return null;
+            parsed = JSON.parse(codeBlockMatch[1].trim());
+        }
+
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+            return null;
+        }
+
+        const fields: ParsedRewriteField[] = [];
+
+        for (const [key, value] of Object.entries(parsed)) {
+            if (typeof value === 'string' && value.trim()) {
+                const fieldDef = CHARACTER_FIELDS.find(f =>
+                    f.key === key || f.label.toLowerCase() === key.toLowerCase(),
+                );
+
+                fields.push({
+                    key: fieldDef?.key || key,
+                    label: fieldDef?.label || formatFieldLabel(key),
+                    value: value.trim(),
+                });
+            }
+        }
+
+        if (fields.length === 0) return null;
+
+        return {
+            fields,
+            raw: response,
+            parseMethod: 'json',
+        };
+    } catch {
+        return null;
+    }
+}
+
+function tryParseAsMarkdown(response: string): ParsedRewrite | null {
+    // Match ### Header or ## Header patterns
+    const headerPattern = /^#{2,3}\s+(.+?)$/gm;
+    const matches = [...response.matchAll(headerPattern)];
+
+    if (matches.length === 0) return null;
+
+    const fields: ParsedRewriteField[] = [];
+
+    for (let i = 0; i < matches.length; i++) {
+        const match = matches[i];
+        const headerText = match[1].trim();
+        const startIndex = match.index! + match[0].length;
+        const endIndex = matches[i + 1]?.index ?? response.length;
+        const content = response.slice(startIndex, endIndex).trim();
+
+        if (!content) continue;
+
+        // Try to match header to known field
+        const fieldDef = CHARACTER_FIELDS.find(f =>
+            f.label.toLowerCase() === headerText.toLowerCase() ||
+            f.key === headerText.toLowerCase().replace(/\s+/g, '_'),
+        );
+
+        // Skip non-character fields like "Summary" or "Notes"
+        const skipHeaders = ['summary', 'notes', 'changes', 'revised', 'original'];
+        if (!fieldDef && skipHeaders.some(s => headerText.toLowerCase().includes(s))) {
+            continue;
+        }
+
+        fields.push({
+            key: fieldDef?.key || headerText.toLowerCase().replace(/\s+/g, '_'),
+            label: fieldDef?.label || headerText,
+            value: content,
+        });
+    }
+
+    if (fields.length === 0) return null;
+
+    return {
+        fields,
+        raw: response,
+        parseMethod: 'markdown',
+    };
+}
+
+function tryParseWithHeuristics(response: string): ParsedRewrite | null {
+    const fields: ParsedRewriteField[] = [];
+
+    // Look for patterns like "Description:" or "**Description:**"
+    for (const fieldDef of CHARACTER_FIELDS) {
+        const patterns = [
+            new RegExp(`\\*\\*${fieldDef.label}:\\*\\*\\s*([\\s\\S]*?)(?=\\*\\*[A-Z]|$)`, 'i'),
+            new RegExp(`${fieldDef.label}:\\s*([\\s\\S]*?)(?=\\n[A-Z][a-z]+:|$)`, 'i'),
+            new RegExp(`\\[${fieldDef.label}\\]\\s*([\\s\\S]*?)(?=\\[[A-Z]|$)`, 'i'),
+        ];
+
+        for (const pattern of patterns) {
+            const match = response.match(pattern);
+            if (match && match[1].trim()) {
+                fields.push({
+                    key: fieldDef.key,
+                    label: fieldDef.label,
+                    value: match[1].trim(),
+                });
+                break;
+            }
+        }
+    }
+
+    if (fields.length === 0) return null;
+
+    return {
+        fields,
+        raw: response,
+        parseMethod: 'heuristic',
+    };
+}
+
+function formatFieldLabel(key: string): string {
+    return key
+        .replace(/_/g, ' ')
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// ============================================================================
+// APPLY REWRITE TO CHARACTER
+// ============================================================================
+
+/**
+ * Apply parsed rewrite fields to a character.
+ * Returns the updated character data or null on failure.
+ */
+export async function applyRewriteToCharacter(
+    state: PipelineState,
+    parsedFields: ParsedRewriteField[],
+): Promise<{ success: boolean; error?: string; updatedFields: string[] }> {
+    if (!state.character || state.characterIndex === null) {
+        return { success: false, error: 'No character selected', updatedFields: [] };
+    }
+
+    const { characters, unshallowCharacter, getRequestHeaders } = SillyTavern.getContext();
+
+    try {
+        // Ensure character data is fully loaded
+        await unshallowCharacter(state.characterIndex);
+
+        // Get fresh character reference after unshallow
+        const charList = characters as Character[];
+        const character = charList[state.characterIndex];
+
+        if (!character) {
+            return { success: false, error: 'Character not found after unshallow', updatedFields: [] };
+        }
+
+        // Build update object
+        const updates: Partial<Character> = {};
+        const updatedFields: string[] = [];
+
+        for (const field of parsedFields) {
+            // Only update known character fields
+            const fieldDef = CHARACTER_FIELDS.find(f => f.key === field.key);
+            if (fieldDef && field.value.trim()) {
+                (updates as Record<string, string>)[field.key] = field.value.trim();
+                updatedFields.push(field.label);
+            }
+        }
+
+        if (updatedFields.length === 0) {
+            return { success: false, error: 'No valid fields to update', updatedFields: [] };
+        }
+
+        // Apply updates to character object
+        Object.assign(character, updates);
+
+        // Save to server
+        const saveResponse = await fetch('/api/characters/edit', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({
+                avatar_url: character.avatar,
+                ...character,
+            }),
+        });
+
+        if (!saveResponse.ok) {
+            const errorText = await saveResponse.text();
+            logError('Failed to save character', { status: saveResponse.status, error: errorText });
+            return { success: false, error: `Save failed: ${saveResponse.status}`, updatedFields: [] };
+        }
+
+        debugLog('info', 'Character updated successfully', {
+            name: character.name,
+            updatedFields,
+        });
+
+        return { success: true, updatedFields };
+    } catch (e) {
+        logError('Error applying rewrite to character', e);
+        return { success: false, error: (e as Error).message, updatedFields: [] };
+    }
 }
 
 // ============================================================================
@@ -4138,6 +4492,7 @@ export function canExport(state: PipelineState): boolean {
 
 /**
  * Build the complete prompt for a stage, including template substitution.
+ * If no placeholders are detected, prepends character data automatically.
  */
 export function buildStagePrompt(state: PipelineState, stage: StageName): string | null {
     if (!state.character) {
@@ -4169,27 +4524,29 @@ export function buildStagePrompt(state: PipelineState, stage: StageName): string
     };
 
     // Check which placeholders are used in the prompt
-    const promptLower = basePrompt.toLowerCase();
-    const usesCharacterPlaceholder = promptLower.includes('{{original_character}}');
-    const usesScorePlaceholder = promptLower.includes('{{score_results}}');
-    const usesRewritePlaceholder = promptLower.includes('{{rewrite_results}}');
+    const foundPlaceholders = promptHasPlaceholders(basePrompt);
+    const hasAnyPlaceholder = foundPlaceholders.length > 0;
 
     // Process template placeholders in the prompt
     const processedPrompt = processPromptTemplate(basePrompt, context);
 
-    // If ALL relevant placeholders are used, just return the processed prompt
-    const allPlaceholdersUsed = checkAllPlaceholdersUsed(stage, usesCharacterPlaceholder, usesScorePlaceholder, usesRewritePlaceholder, state);
+    // If prompt has placeholders, trust that user knows what they're doing
+    if (hasAnyPlaceholder) {
+        // But still check if critical data is missing
+        const usesCharacterPlaceholder = foundPlaceholders.includes('ORIGINAL_CHARACTER');
 
-    if (allPlaceholdersUsed) {
-        return processedPrompt;
+        // If they use character placeholder, just return processed prompt
+        if (usesCharacterPlaceholder) {
+            return processedPrompt;
+        }
+
+        // If they use other placeholders but not character, prepend character data
+        return buildStructuredPrompt(stage, state, characterSummary, processedPrompt);
     }
 
-    // Otherwise, build a structured prompt with all relevant data
-    return buildStructuredPrompt(stage, state, characterSummary, processedPrompt, {
-        usesCharacterPlaceholder,
-        usesScorePlaceholder,
-        usesRewritePlaceholder,
-    });
+    // No placeholders detected - prepend all relevant data automatically
+    debugLog('info', 'No placeholders in prompt, auto-prepending character data', { stage });
+    return buildStructuredPrompt(stage, state, characterSummary, processedPrompt);
 }
 
 /**
@@ -4221,39 +4578,6 @@ export function buildRefinementPrompt(state: PipelineState): string | null {
 }
 
 /**
- * Check if all relevant placeholders for a stage are used
- */
-function checkAllPlaceholdersUsed(
-    stage: StageName,
-    usesCharacter: boolean,
-    usesScore: boolean,
-    usesRewrite: boolean,
-    state: PipelineState,
-): boolean {
-    switch (stage) {
-        case 'score':
-            // Score only needs character
-            return usesCharacter;
-
-        case 'rewrite':
-            // Rewrite needs character, and score if available
-            if (!usesCharacter) return false;
-            if (state.results.score && !usesScore) return false;
-            return true;
-
-        case 'analyze':
-            // Analyze needs character, rewrite, and score if available
-            if (!usesCharacter) return false;
-            if (state.results.rewrite && !usesRewrite) return false;
-            if (state.results.score && !usesScore) return false;
-            return true;
-
-        default:
-            return false;
-    }
-}
-
-/**
  * Build a structured prompt with all relevant data prepended
  */
 function buildStructuredPrompt(
@@ -4261,15 +4585,12 @@ function buildStructuredPrompt(
     state: PipelineState,
     characterSummary: string,
     instructions: string,
-    usedPlaceholders: { usesCharacterPlaceholder: boolean; usesScorePlaceholder: boolean; usesRewritePlaceholder: boolean },
 ): string {
     const parts: string[] = [];
 
-    // Always include character if not already in prompt via placeholder
-    if (!usedPlaceholders.usesCharacterPlaceholder) {
-        const stageAction = stage === 'score' ? 'Analyze' : stage === 'rewrite' ? 'Rewrite' : 'Compare';
-        parts.push(`# Character to ${stageAction}`, '', characterSummary);
-    }
+    // Always include character
+    const stageAction = stage === 'score' ? 'Analyze' : stage === 'rewrite' ? 'Rewrite' : 'Compare';
+    parts.push(`# Character to ${stageAction}`, '', characterSummary);
 
     // Stage-specific data
     switch (stage) {
@@ -4278,20 +4599,20 @@ function buildStructuredPrompt(
             break;
 
         case 'rewrite':
-            // Include score results if available and not already in prompt
-            if (state.results.score?.response && !usedPlaceholders.usesScorePlaceholder) {
+            // Include score results if available
+            if (state.results.score?.response) {
                 parts.push('', '---', '', '# Score Feedback', '', 'Use this feedback to guide your rewrite:', '', state.results.score.response);
             }
             break;
 
         case 'analyze':
-            // Include rewrite results if available and not already in prompt
-            if (state.results.rewrite?.response && !usedPlaceholders.usesRewritePlaceholder) {
+            // Include rewrite results
+            if (state.results.rewrite?.response) {
                 parts.push('', '---', '', '# Rewritten Version', '', 'Compare this against the original:', '', state.results.rewrite.response);
             }
 
-            // Include score results if available and not already in prompt
-            if (state.results.score?.response && !usedPlaceholders.usesScorePlaceholder) {
+            // Include score results if available
+            if (state.results.score?.response) {
                 parts.push('', '---', '', '# Original Score Feedback', '', 'Reference for what was identified as needing improvement:', '', state.results.score.response);
             }
             break;
@@ -4402,18 +4723,18 @@ export function setExportData(state: PipelineState): PipelineState {
  * Get a summary of pipeline state for debugging/display
  */
 export function getPipelineSummary(state: PipelineState): {
-  hasCharacter: boolean;
-  characterName: string | null;
-  selectedStages: StageName[];
-  stageStatuses: Record<StageName, StageStatus>;
-  completedStages: StageName[];
-  lockedStages: StageName[];
-  currentStage: StageName | null;
-  canExport: boolean;
-  isComplete: boolean;
-  iterationCount: number;
-  isRefining: boolean;
-  lastVerdict: IterationVerdict | null;
+    hasCharacter: boolean;
+    characterName: string | null;
+    selectedStages: StageName[];
+    stageStatuses: Record<StageName, StageStatus>;
+    completedStages: StageName[];
+    lockedStages: StageName[];
+    currentStage: StageName | null;
+    canExport: boolean;
+    isComplete: boolean;
+    iterationCount: number;
+    isRefining: boolean;
+    lastVerdict: IterationVerdict | null;
 } {
     const completedStages = STAGES.filter(s => state.stageStatus[s] === 'complete');
     const lockedStages = STAGES.filter(s => state.results[s]?.locked);
@@ -4467,9 +4788,9 @@ export function getStageResult(state: PipelineState, stage: StageName): StageRes
  * Validate pipeline state before running
  */
 export interface PipelineValidation {
-  valid: boolean;
-  errors: string[];
-  warnings: string[];
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
 }
 
 export function validatePipeline(state: PipelineState): PipelineValidation {
@@ -4610,7 +4931,7 @@ export function deserializePipelineState(
             exportData: data.exportData as string | null,
         };
     } catch (e) {
-        debugLog('error', 'Failed to deserialize pipeline state', e);
+        logError('Failed to deserialize pipeline state', e);
         return null;
     }
 }
@@ -4729,14 +5050,14 @@ export function createStageConfigFromDefaults(stage: StageName): StageConfig {
 // ============================================================================
 
 export interface TemplateContext {
-  originalCharacter?: string;
-  scoreResults?: string;
-  rewriteResults?: string;
-  currentRewrite?: string;
-  currentAnalysis?: string;
-  iterationNumber?: string;
-  charName?: string;
-  userName?: string;
+    originalCharacter?: string;
+    scoreResults?: string;
+    rewriteResults?: string;
+    currentRewrite?: string;
+    currentAnalysis?: string;
+    iterationNumber?: string;
+    charName?: string;
+    userName?: string;
 }
 
 /**
@@ -4750,6 +5071,8 @@ export interface TemplateContext {
  * 4. Handle conditional blocks {{#if score_results}}...{{/if}}
  */
 export function processPromptTemplate(prompt: string, context: TemplateContext): string {
+    const { lodash } = SillyTavern.libs;
+
     // First, run ST's macro substitution for standard macros
     const { substituteParams } = SillyTavern.getContext();
     let processed = substituteParams(prompt);
@@ -4757,45 +5080,45 @@ export function processPromptTemplate(prompt: string, context: TemplateContext):
     // Handle conditional blocks first
     processed = processConditionalBlocks(processed, context);
 
-    // Now replace our custom placeholders
+    // Now replace our custom placeholders using lodash.escapeRegExp
     if (context.originalCharacter !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.ORIGINAL_CHARACTER), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.ORIGINAL_CHARACTER), 'gi'),
             context.originalCharacter,
         );
     }
 
     if (context.scoreResults !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.SCORE_RESULTS), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.SCORE_RESULTS), 'gi'),
             context.scoreResults,
         );
     }
 
     if (context.rewriteResults !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.REWRITE_RESULTS), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.REWRITE_RESULTS), 'gi'),
             context.rewriteResults,
         );
     }
 
     if (context.currentRewrite !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.CURRENT_REWRITE), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.CURRENT_REWRITE), 'gi'),
             context.currentRewrite,
         );
     }
 
     if (context.currentAnalysis !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.CURRENT_ANALYSIS), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.CURRENT_ANALYSIS), 'gi'),
             context.currentAnalysis,
         );
     }
 
     if (context.iterationNumber !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.ITERATION_NUMBER), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.ITERATION_NUMBER), 'gi'),
             context.iterationNumber,
         );
     }
@@ -4803,7 +5126,7 @@ export function processPromptTemplate(prompt: string, context: TemplateContext):
     // Replace {{char_name}} with our specific character
     if (context.charName !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.CHARACTER_NAME), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.CHARACTER_NAME), 'gi'),
             context.charName,
         );
     }
@@ -4811,7 +5134,7 @@ export function processPromptTemplate(prompt: string, context: TemplateContext):
     // Replace {{user_name}} with our specific user
     if (context.userName !== undefined) {
         processed = processed.replace(
-            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.USER_NAME), 'gi'),
+            new RegExp(lodash.escapeRegExp(TEMPLATE_PLACEHOLDERS.USER_NAME), 'gi'),
             context.userName,
         );
     }
@@ -4835,7 +5158,7 @@ function processConditionalBlocks(prompt: string, context: TemplateContext): str
     // Match {{#if variable}}...{{/if}} blocks
     const conditionalRegex = /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/gi;
 
-    return prompt.replace(conditionalRegex, (match, variable, content) => {
+    return prompt.replace(conditionalRegex, (_match, variable, content) => {
         const varName = variable.toLowerCase();
 
         // Check if the variable has a truthy value
@@ -4921,10 +5244,10 @@ export function getUnfilledPlaceholders(prompt: string, stage: StageName, hasSco
 // ============================================================================
 
 export interface PresetOption {
-  id: string;
-  name: string;
-  isBuiltin: boolean;
-  isSelected: boolean;
+    id: string;
+    name: string;
+    isBuiltin: boolean;
+    isSelected: boolean;
 }
 
 /**
@@ -4993,11 +5316,11 @@ export function getSchemaForEditing(config: StageConfig): string {
  * Validate a schema string and return user-friendly result
  */
 export interface SchemaValidationUIResult {
-  isValid: boolean;
-  isEmpty: boolean;
-  errorMessage: string | null;
-  warnings: string[];
-  info: string[];
+    isValid: boolean;
+    isEmpty: boolean;
+    errorMessage: string | null;
+    warnings: string[];
+    info: string[];
 }
 
 export function validateSchemaForUI(schemaJson: string): SchemaValidationUIResult {
@@ -5030,9 +5353,9 @@ export function validateSchemaForUI(schemaJson: string): SchemaValidationUIResul
  * Validate a prompt preset before saving
  */
 export interface PresetValidationResult {
-  valid: boolean;
-  errors: string[];
-  warnings: string[];
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
 }
 
 export function validatePromptPreset(preset: Partial<PromptPreset>): PresetValidationResult {
@@ -5051,10 +5374,16 @@ export function validatePromptPreset(preset: Partial<PromptPreset>): PresetValid
         errors.push('Prompt is too long (max 50,000 characters)');
     }
 
-    // Check for common issues
+    // Check for common issues - but don't error if no placeholders
     if (preset.prompt) {
-        if (preset.prompt.includes('{{') && !promptHasPlaceholders(preset.prompt).length) {
-            warnings.push('Prompt contains {{ but no recognized placeholders');
+        const hasDoubleBraces = preset.prompt.includes('{{');
+        const foundPlaceholders = promptHasPlaceholders(preset.prompt);
+
+        if (hasDoubleBraces && foundPlaceholders.length === 0) {
+            // Has {{ but no recognized placeholders - might be intentional (custom macros)
+            debugLog('info', 'Prompt has {{ but no recognized placeholders', {
+                promptPreview: preset.prompt.substring(0, 100),
+            });
         }
     }
 
@@ -5105,10 +5434,6 @@ export function validateSchemaPreset(preset: Partial<SchemaPreset>): PresetValid
 // UTILITIES
 // ============================================================================
 
-function escapeRegex(string: string): string {
-    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /**
  * Check if a preset name is unique (for validation)
  */
@@ -5133,6 +5458,172 @@ export function generateUniquePresetName(type: 'prompt' | 'schema', baseName: st
     }
 
     return name;
+}
+```
+
+## FILE: src/persistence.ts
+```ts
+// src/persistence.ts
+//
+// Persistence layer for iteration history using localforage.
+// Stores iteration history per-character so users can resume work across sessions.
+
+import { MODULE_NAME } from './constants';
+import { debugLog, logError } from './debug';
+import type { Character, IterationSnapshot } from './types';
+
+// ============================================================================
+// KEY GENERATION
+// ============================================================================
+
+/**
+ * Generate a unique key for a character.
+ * Uses avatar + name since avatar alone isn't unique.
+ */
+export function getCharacterKey(character: Character): string {
+    // Sanitize for storage key - remove special chars
+    const sanitizedName = character.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const sanitizedAvatar = character.avatar.replace(/[^a-zA-Z0-9_-]/g, '_');
+    return `${MODULE_NAME}_history_${sanitizedAvatar}_${sanitizedName}`;
+}
+
+// ============================================================================
+// ITERATION HISTORY PERSISTENCE
+// ============================================================================
+
+/**
+ * Save iteration history for a character
+ */
+export async function saveIterationHistory(
+    character: Character,
+    history: IterationSnapshot[],
+): Promise<boolean> {
+    const { localforage } = SillyTavern.libs;
+    const key = getCharacterKey(character);
+
+    try {
+        await localforage.setItem(key, {
+            characterName: character.name,
+            characterAvatar: character.avatar,
+            history,
+            savedAt: Date.now(),
+        });
+
+        debugLog('info', 'Iteration history saved', {
+            key,
+            characterName: character.name,
+            historyLength: history.length,
+        });
+
+        return true;
+    } catch (e) {
+        logError('Failed to save iteration history', { key, error: e });
+        return false;
+    }
+}
+
+/**
+ * Load iteration history for a character
+ */
+export async function loadIterationHistory(
+    character: Character,
+): Promise<IterationSnapshot[] | null> {
+    const { localforage } = SillyTavern.libs;
+    const key = getCharacterKey(character);
+
+    try {
+        const data = await localforage.getItem(key) as {
+            characterName: string;
+            characterAvatar: string;
+            history: IterationSnapshot[];
+            savedAt: number;
+        } | null;
+
+        if (!data) {
+            debugLog('info', 'No iteration history found', { key });
+            return null;
+        }
+
+        // Verify it's for the same character (in case of key collision)
+        if (data.characterName !== character.name || data.characterAvatar !== character.avatar) {
+            debugLog('info', 'Iteration history key collision, ignoring', {
+                key,
+                storedName: data.characterName,
+                currentName: character.name,
+            });
+            return null;
+        }
+
+        debugLog('info', 'Iteration history loaded', {
+            key,
+            characterName: character.name,
+            historyLength: data.history.length,
+            savedAt: new Date(data.savedAt).toISOString(),
+        });
+
+        return data.history;
+    } catch (e) {
+        logError('Failed to load iteration history', { key, error: e });
+        return null;
+    }
+}
+
+/**
+ * Clear iteration history for a character
+ */
+export async function clearIterationHistory(character: Character): Promise<boolean> {
+    const { localforage } = SillyTavern.libs;
+    const key = getCharacterKey(character);
+
+    try {
+        await localforage.removeItem(key);
+
+        debugLog('info', 'Iteration history cleared', {
+            key,
+            characterName: character.name,
+        });
+
+        return true;
+    } catch (e) {
+        logError('Failed to clear iteration history', { key, error: e });
+        return false;
+    }
+}
+
+/**
+ * Get all stored iteration history keys (for debugging/cleanup)
+ */
+export async function getAllHistoryKeys(): Promise<string[]> {
+    const { localforage } = SillyTavern.libs;
+
+    try {
+        const allKeys = await localforage.keys();
+        return allKeys.filter((key: string) => key.startsWith(`${MODULE_NAME}_history_`));
+    } catch (e) {
+        logError('Failed to get history keys', { error: e });
+        return [];
+    }
+}
+
+/**
+ * Clear all iteration history (for debugging/cleanup)
+ */
+export async function clearAllIterationHistory(): Promise<number> {
+    const keys = await getAllHistoryKeys();
+    const { localforage } = SillyTavern.libs;
+
+    let cleared = 0;
+    for (const key of keys) {
+        try {
+            await localforage.removeItem(key);
+            cleared++;
+        } catch (e) {
+            logError('Failed to clear history key', { key, error: e });
+        }
+    }
+
+    debugLog('info', 'All iteration history cleared', { cleared, total: keys.length });
+    return cleared;
 }
 ```
 
@@ -5204,7 +5695,7 @@ export function parseStructuredResponse(response: string): unknown | null {
     try {
         return JSON.parse(response);
     } catch {
-    // Try to extract JSON from markdown code blocks
+        // Try to extract JSON from markdown code blocks
         const codeBlockMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
         if (codeBlockMatch) {
             try {
@@ -5611,7 +6102,7 @@ function isEmail(str: string): boolean {
 
 import { MODULE_NAME, EXTENSION_PATH } from '../constants';
 import { getSettings, setDebugMode } from '../settings';
-import { debugLog } from '../debug';
+import { debugLog, logError } from '../debug';
 import { openMainPopup } from './popup';
 
 // ============================================================================
@@ -5626,7 +6117,7 @@ export async function initPanel(): Promise<void> {
 
     const container = document.getElementById('extensions_settings');
     if (!container) {
-        console.error(`[${MODULE_NAME}] Extensions container not found`);
+        logError('Extensions container not found', null);
         return;
     }
 
@@ -5642,7 +6133,7 @@ export async function initPanel(): Promise<void> {
 
         debugLog('info', 'Panel initialized', null);
     } catch (error) {
-        console.error(`[${MODULE_NAME}] Failed to load panel template:`, error);
+        logError('Failed to load panel template', error);
     }
 }
 
@@ -5715,7 +6206,10 @@ import {
     completeRefinement,
     acceptRewrite,
     revertToIteration,
+    parseRewriteResponse,
+    applyRewriteToCharacter,
 } from '../pipeline';
+import { getPromptPreset, getSchemaPreset } from '../settings';
 import { runStageGeneration, runRefinementGeneration, getStageTokenCount, getRefinementTokenCount, getApiInfo, isApiReady } from '../generator';
 import { renderCharacterSelect, updateCharacterSelectState, renderDropdownItems, updateFieldTokenCounts } from './components/character-select';
 import { getPopulatedFields } from '../character';
@@ -5733,6 +6227,7 @@ import {
 import { renderResultsPanel, updateResultsPanelState, renderRefinementLoading } from './components/results-panel';
 import { renderIterationHistory, updateIterationHistoryState, renderIterationViewContent } from './components/iteration-history';
 import { openSettingsModal } from './settings-modal';
+import { saveIterationHistory, loadIterationHistory } from '../persistence';
 import type { PipelineState, StageName, Character, IterationSnapshot } from '../types';
 
 // ============================================================================
@@ -5745,7 +6240,9 @@ let popupState: {
     isRefining: boolean;
     abortController: AbortController | null;
     activeStageView: StageName;
-    characters: Character[];
+    historyLoaded: boolean;
+    // Store debounced functions for cleanup
+    debouncedFunctions: Array<{ cancel: () => void }>;
 } | null = null;
 
 let popupElement: HTMLElement | null = null;
@@ -5765,12 +6262,23 @@ function subscribeEvents(): void {
             updateApiStatus();
         },
 
-        onCharEdited: () => {
-            debugLog('info', 'Character edited externally', null);
-            refreshSelectedCharacter();
+        onMainApiChange: () => {
+            debugLog('info', 'Main API changed', null);
+            updateApiStatus();
+            updateTokenEstimate();
+        },
+
+        onCharEdited: (data: { detail?: { character: Character; id: string }; character?: Character; id?: number }) => {
+            // Handle both payload formats - CHARACTER_EDITED uses { detail: { character, id: string } }
+            const character = data.detail?.character ?? data.character;
+            const id = data.detail?.id !== undefined ? parseInt(data.detail.id, 10) : data.id;
+
+            debugLog('info', 'Character edited externally', { id, name: character?.name });
+            refreshSelectedCharacter(id as number);
         },
 
         onCharDeleted: (data: { id: number; character: Character }) => {
+            // CHARACTER_DELETED uses flat { id: number, character }
             debugLog('info', 'Character deleted', { id: data.id });
             handleCharacterDeleted(data.id);
         },
@@ -5796,6 +6304,7 @@ function subscribeEvents(): void {
     };
 
     eventSource.on(eventTypes.ONLINE_STATUS_CHANGED, handlers.onStatusChange);
+    eventSource.on(eventTypes.MAIN_API_CHANGED, handlers.onMainApiChange);
     eventSource.on(eventTypes.CHARACTER_EDITED, handlers.onCharEdited);
     eventSource.on(eventTypes.CHARACTER_DELETED, handlers.onCharDeleted);
     eventSource.on(eventTypes.OAI_PRESET_CHANGED_AFTER, handlers.onPresetChanged);
@@ -5804,6 +6313,7 @@ function subscribeEvents(): void {
 
     eventCleanup.push(
         () => eventSource.removeListener(eventTypes.ONLINE_STATUS_CHANGED, handlers.onStatusChange),
+        () => eventSource.removeListener(eventTypes.MAIN_API_CHANGED, handlers.onMainApiChange),
         () => eventSource.removeListener(eventTypes.CHARACTER_EDITED, handlers.onCharEdited),
         () => eventSource.removeListener(eventTypes.CHARACTER_DELETED, handlers.onCharDeleted),
         () => eventSource.removeListener(eventTypes.OAI_PRESET_CHANGED_AFTER, handlers.onPresetChanged),
@@ -5841,14 +6351,18 @@ function updateApiStatus(): void {
     updatePipelineNav();
 }
 
-function refreshSelectedCharacter(): void {
+function refreshSelectedCharacter(editedId?: number): void {
     if (!popupState || popupState.pipeline.characterIndex === null) return;
 
+    // Get fresh characters from context - don't use cached
     const { characters } = SillyTavern.getContext();
     const charList = characters as Character[];
     const index = popupState.pipeline.characterIndex;
 
-    popupState.characters = charList;
+    // If a specific character was edited and it's not ours, ignore
+    if (editedId !== undefined && editedId !== index) {
+        return;
+    }
 
     if (index >= 0 && index < charList.length) {
         const updatedChar = charList[index];
@@ -5880,9 +6394,11 @@ function handleCharacterDeleted(deletedId: number): void {
         handleCharacterInvalidated();
         toastr.warning('Selected character was deleted');
     } else if (currentIndex > deletedId) {
-        const newIndex = currentIndex - 1;
+        // Get fresh characters from context
         const { characters } = SillyTavern.getContext();
         const charList = characters as Character[];
+
+        const newIndex = currentIndex - 1;
 
         if (newIndex >= 0 && newIndex < charList.length) {
             popupState.pipeline = {
@@ -5890,7 +6406,6 @@ function handleCharacterDeleted(deletedId: number): void {
                 characterIndex: newIndex,
                 character: charList[newIndex],
             };
-            popupState.characters = charList;
             debugLog('info', 'Character index adjusted after deletion', { oldIndex: currentIndex, newIndex });
         } else {
             handleCharacterInvalidated();
@@ -5904,6 +6419,7 @@ function handleCharacterInvalidated(): void {
     debugLog('info', 'Character invalidated, clearing selection', null);
 
     popupState.pipeline = setCharacter(popupState.pipeline, null, null);
+    popupState.historyLoaded = false;
     updateAllComponents();
     toastr.info('Character selection cleared');
 }
@@ -5945,6 +6461,12 @@ function removeGlobalListeners(): void {
         document.removeEventListener('click', documentClickHandler);
         documentClickHandler = null;
     }
+
+    // Cancel any pending debounced operations
+    if (popupState?.debouncedFunctions) {
+        popupState.debouncedFunctions.forEach(fn => fn.cancel());
+        popupState.debouncedFunctions = [];
+    }
 }
 
 // ============================================================================
@@ -5952,10 +6474,8 @@ function removeGlobalListeners(): void {
 // ============================================================================
 
 export async function openMainPopup(): Promise<void> {
-    const { Popup, POPUP_TYPE, characters } = SillyTavern.getContext();
+    const { Popup, POPUP_TYPE } = SillyTavern.getContext();
     const { DOMPurify } = SillyTavern.libs;
-
-    const charList = characters as Character[];
 
     popupState = {
         pipeline: createPipelineState(),
@@ -5963,7 +6483,8 @@ export async function openMainPopup(): Promise<void> {
         isRefining: false,
         abortController: null,
         activeStageView: 'score',
-        characters: charList,
+        historyLoaded: false,
+        debouncedFunctions: [],
     };
 
     const content = buildPopupContent();
@@ -5993,6 +6514,11 @@ export async function openMainPopup(): Promise<void> {
 
     subscribeEvents();
     initGlobalListeners();
+
+    // Get fresh characters from context
+    const { characters } = SillyTavern.getContext();
+    const charList = characters as Character[];
+
     initComponents(charList);
     updateAllComponents();
 
@@ -6080,7 +6606,7 @@ function initComponents(characters: Character[]): void {
     const charContainer = popupElement.querySelector(`#${MODULE_NAME}_character_select_container`);
     if (charContainer) {
         charContainer.innerHTML = renderCharacterSelect(characters, popupState.pipeline.characterIndex);
-        initCharacterSelectListeners(characters);
+        initCharacterSelectListeners();
     }
 
     // Pipeline nav
@@ -6124,7 +6650,7 @@ function initComponents(characters: Character[]): void {
         historyContainer.innerHTML = renderIterationHistory(
             popupState.pipeline.iterationHistory,
             popupState.pipeline.iterationCount,
-            handleRevertToIteration,
+            popupState.historyLoaded,
         );
         initIterationHistoryListeners();
     }
@@ -6132,6 +6658,10 @@ function initComponents(characters: Character[]): void {
     // Header buttons
     popupElement.querySelector(`#${MODULE_NAME}_settings_btn`)?.addEventListener('click', () => {
         openSettingsModal(() => {
+            // After settings close, check if any deleted presets were in use
+            if (popupState) {
+                checkForDeletedPresetReferences();
+            }
             updateAllComponents();
         });
     });
@@ -6145,12 +6675,39 @@ function initComponents(characters: Character[]): void {
     });
 }
 
+/**
+ * Check if current pipeline configs reference deleted presets and clear them
+ */
+function checkForDeletedPresetReferences(): void {
+    if (!popupState) return;
+
+    for (const stage of STAGES) {
+        const config = popupState.pipeline.configs[stage];
+
+        // Check prompt preset
+        if (config.promptPresetId && !getPromptPreset(config.promptPresetId)) {
+            debugLog('info', 'Clearing deleted prompt preset reference', { stage, presetId: config.promptPresetId });
+            popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, stage, {
+                promptPresetId: null,
+            });
+        }
+
+        // Check schema preset
+        if (config.schemaPresetId && !getSchemaPreset(config.schemaPresetId)) {
+            debugLog('info', 'Clearing deleted schema preset reference', { stage, presetId: config.schemaPresetId });
+            popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, stage, {
+                schemaPresetId: null,
+            });
+        }
+    }
+}
+
 // ============================================================================
 // CHARACTER SELECT LISTENERS
 // ============================================================================
 
-function initCharacterSelectListeners(characters: Character[]): void {
-    if (!popupElement) return;
+function initCharacterSelectListeners(): void {
+    if (!popupElement || !popupState) return;
 
     const { Fuse, lodash } = SillyTavern.libs;
 
@@ -6166,7 +6723,10 @@ function initCharacterSelectListeners(characters: Character[]): void {
     let currentResults: Array<{ char: Character; index: number }> = [];
 
     const handleSearch = () => {
-        const currentChars = popupState?.characters || characters;
+        // Get fresh characters from context
+        const { characters } = SillyTavern.getContext();
+        const currentChars = characters as Character[];
+
         const currentCharData = currentChars
             .map((char, index) => ({ char, index }))
             .filter(({ char }) => char?.name);
@@ -6201,6 +6761,7 @@ function initCharacterSelectListeners(characters: Character[]): void {
     };
 
     const debouncedSearch = lodash.debounce(handleSearch, 150);
+    popupState.debouncedFunctions.push(debouncedSearch);
     searchInput.addEventListener('input', debouncedSearch);
 
     searchInput.addEventListener('keydown', (e) => {
@@ -6251,6 +6812,7 @@ function initCharacterSelectListeners(characters: Character[]): void {
         if (target.closest(`#${MODULE_NAME}_char_clear`)) {
             if (!popupState) return;
             popupState.pipeline = setCharacter(popupState.pipeline, null, null);
+            popupState.historyLoaded = false;
             updateAllComponents();
             return;
         }
@@ -6270,12 +6832,29 @@ function initCharacterSelectListeners(characters: Character[]): void {
     });
 }
 
-function selectCharacter(char: Character, index: number): void {
+async function selectCharacter(char: Character, index: number): Promise<void> {
     if (!popupState) return;
 
     popupState.pipeline = setCharacter(popupState.pipeline, char, index);
+    popupState.historyLoaded = false;
     updateAllComponents();
 
+    // Load iteration history for this character
+    const history = await loadIterationHistory(char);
+    if (popupState && popupState.pipeline.character === char) {
+        if (history && history.length > 0) {
+            popupState.pipeline = {
+                ...popupState.pipeline,
+                iterationHistory: history,
+                iterationCount: history.length,
+            };
+            debugLog('info', 'Loaded iteration history', { count: history.length });
+        }
+        popupState.historyLoaded = true;
+        updateIterationHistory();
+    }
+
+    // Update token counts
     setTimeout(async () => {
         if (!popupElement || !popupState?.pipeline.character) return;
 
@@ -6310,7 +6889,7 @@ function initPipelineNavListeners(): void {
         }
     });
 
-    container.addEventListener('click', (e) => {
+    container.addEventListener('click', async (e) => {
         const btn = (e.target as HTMLElement).closest(`.${MODULE_NAME}_stage_btn`);
         if (btn && popupState) {
             const stage = btn.getAttribute('data-stage') as StageName;
@@ -6335,7 +6914,17 @@ function initPipelineNavListeners(): void {
 
         const resetBtn = (e.target as HTMLElement).closest(`#${MODULE_NAME}_reset_pipeline_btn`);
         if (resetBtn && popupState) {
+            // Confirm before reset
+            const { Popup, POPUP_RESULT } = SillyTavern.getContext();
+            const confirmed = await Popup.show.confirm(
+                'Reset Pipeline?',
+                'This will clear all results and iteration history. Continue?',
+            );
+
+            if (confirmed !== POPUP_RESULT.AFFIRMATIVE) return;
+
             popupState.pipeline = resetPipeline(popupState.pipeline, true);
+            popupState.historyLoaded = true; // No history to load after reset
             updateAllComponents();
         }
     });
@@ -6373,7 +6962,8 @@ function initStageConfigListeners(): void {
     });
 
     const { lodash } = SillyTavern.libs;
-    container.addEventListener('input', lodash.debounce((e: Event) => {
+
+    const debouncedInputHandler = lodash.debounce((e: Event) => {
         const textarea = e.target as HTMLTextAreaElement;
 
         if (textarea.id === `${MODULE_NAME}_custom_prompt` && popupState) {
@@ -6392,7 +6982,10 @@ function initStageConfigListeners(): void {
             });
             updateStageConfigUI();
         }
-    }, 300));
+    }, 300);
+
+    popupState.debouncedFunctions.push(debouncedInputHandler);
+    container.addEventListener('input', debouncedInputHandler);
 
     container.addEventListener('change', (e) => {
         const checkbox = e.target as HTMLInputElement;
@@ -6466,7 +7059,7 @@ function initStageConfigListeners(): void {
         if (validateBtn && popupState) {
             const schemaTextarea = popupElement?.querySelector(`#${MODULE_NAME}_custom_schema`) as HTMLTextAreaElement;
             if (schemaTextarea) {
-                handleValidateSchema(schemaTextarea.value);
+                await handleValidateSchema(schemaTextarea.value);
             }
             return;
         }
@@ -6517,7 +7110,7 @@ function initResultsPanelListeners(): void {
     const container = popupElement.querySelector(`#${MODULE_NAME}_results_container`);
     if (!container) return;
 
-    container.addEventListener('click', (e) => {
+    container.addEventListener('click', async (e) => {
         const target = e.target as HTMLElement;
 
         // Regenerate
@@ -6546,6 +7139,11 @@ function initResultsPanelListeners(): void {
                 updateResultsPanel();
                 updateTokenEstimate();
             }
+        }
+
+        // Apply to Character
+        if (target.closest(`#${MODULE_NAME}_apply_btn`) && popupState) {
+            await handleApplyToCharacter();
         }
 
         // Refine
@@ -6583,6 +7181,92 @@ function initResultsPanelListeners(): void {
             popupState.abortController.abort();
         }
     });
+}
+
+// ============================================================================
+// APPLY TO CHARACTER
+// ============================================================================
+
+async function handleApplyToCharacter(): Promise<void> {
+    if (!popupState || !popupState.pipeline.results.rewrite || !popupState.pipeline.character) {
+        toastr.warning('No rewrite to apply');
+        return;
+    }
+
+    const { Popup, POPUP_TYPE, POPUP_RESULT } = SillyTavern.getContext();
+    const { DOMPurify } = SillyTavern.libs;
+
+    const rewriteResponse = popupState.pipeline.results.rewrite.response;
+    const parsed = parseRewriteResponse(rewriteResponse);
+
+    // Build preview content
+    let previewHtml = `<div class="${MODULE_NAME}_apply_preview">`;
+    previewHtml += `<p><strong>Parse method:</strong> ${parsed.parseMethod}</p>`;
+
+    if (parsed.fields.length === 0) {
+        previewHtml += `<p class="${MODULE_NAME}_apply_warning">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            No recognized character fields found in the rewrite output.
+            The raw content will be copied to clipboard instead.
+        </p>`;
+        previewHtml += `<details><summary>Raw content preview</summary><pre>${DOMPurify.sanitize(parsed.raw.substring(0, 500))}...</pre></details>`;
+    } else {
+        previewHtml += `<p><strong>Fields to update (${parsed.fields.length}):</strong></p>`;
+        previewHtml += '<ul>';
+        for (const field of parsed.fields) {
+            const preview = field.value.substring(0, 100);
+            previewHtml += `<li><strong>${DOMPurify.sanitize(field.label)}:</strong> ${DOMPurify.sanitize(preview)}${field.value.length > 100 ? '...' : ''}</li>`;
+        }
+        previewHtml += '</ul>';
+    }
+    previewHtml += '</div>';
+
+    // Show confirmation
+    const confirmContent = `
+        <h3>Apply Rewrite to Character?</h3>
+        <p>This will update <strong>${DOMPurify.sanitize(popupState.pipeline.character.name)}</strong> with the rewritten content.</p>
+        ${previewHtml}
+    `;
+
+    const popup = new Popup(confirmContent, POPUP_TYPE.CONFIRM, '', {
+        wide: true,
+        okButton: parsed.fields.length > 0 ? 'Apply Changes' : 'Copy Raw Content',
+        cancelButton: 'Cancel',
+    });
+
+    const result = await popup.show();
+
+    if (result !== POPUP_RESULT.AFFIRMATIVE) {
+        return;
+    }
+
+    // If no fields parsed, just copy raw content
+    if (parsed.fields.length === 0) {
+        navigator.clipboard.writeText(parsed.raw);
+        toastr.info('Raw content copied to clipboard');
+        return;
+    }
+
+    // Apply the changes
+    const applyResult = await applyRewriteToCharacter(popupState.pipeline, parsed.fields);
+
+    if (applyResult.success) {
+        toastr.success(`Updated ${applyResult.updatedFields.length} fields: ${applyResult.updatedFields.join(', ')}`);
+
+        // Emit custom event for other extensions
+        const { eventSource } = SillyTavern.getContext();
+        await eventSource.emit('character_tools_rewrite_applied', {
+            characterName: popupState.pipeline.character.name,
+            characterIndex: popupState.pipeline.characterIndex,
+            updatedFields: applyResult.updatedFields,
+            iterationCount: popupState.pipeline.iterationCount,
+        });
+
+        // Refresh character data
+        refreshSelectedCharacter();
+    } else {
+        toastr.error(applyResult.error || 'Failed to apply changes');
+    }
 }
 
 // ============================================================================
@@ -6632,6 +7316,12 @@ async function handleRevertToIteration(index: number): Promise<void> {
 
     popupState.pipeline = revertToIteration(popupState.pipeline, index);
     toastr.info(`Reverted to iteration #${index + 1}`);
+
+    // Save updated history
+    if (popupState.pipeline.character) {
+        await saveIterationHistory(popupState.pipeline.character, popupState.pipeline.iterationHistory);
+    }
+
     updateAllComponents();
 }
 
@@ -6784,6 +7474,12 @@ async function runRefinement(): Promise<void> {
         toastr.warning(validation.warnings.join('\n'));
     }
 
+    // Snapshot current state before starting refinement
+    const preRefinementState = {
+        iterationCount: popupState.pipeline.iterationCount,
+        iterationHistory: [...popupState.pipeline.iterationHistory],
+    };
+
     // Start refinement - this snapshots current state
     popupState.pipeline = startRefinement(popupState.pipeline);
     popupState.isRefining = true;
@@ -6814,14 +7510,33 @@ async function runRefinement(): Promise<void> {
 
             toastr.success(`Refinement #${popupState.pipeline.iterationCount} complete`);
 
+            // Save iteration history
+            if (popupState.pipeline.character) {
+                await saveIterationHistory(popupState.pipeline.character, popupState.pipeline.iterationHistory);
+            }
+
             // Switch to analyze view so user can review
             popupState.activeStageView = 'analyze';
         } else {
+            // Restore pre-refinement state on failure
+            popupState.pipeline = {
+                ...popupState.pipeline,
+                iterationCount: preRefinementState.iterationCount,
+                iterationHistory: preRefinementState.iterationHistory,
+            };
+
             if (result.error !== 'Generation cancelled') {
                 toastr.error(result.error);
             }
         }
     } catch (e) {
+        // Restore pre-refinement state on error
+        popupState.pipeline = {
+            ...popupState.pipeline,
+            iterationCount: preRefinementState.iterationCount,
+            iterationHistory: preRefinementState.iterationHistory,
+        };
+
         toastr.error((e as Error).message);
     } finally {
         popupState.isRefining = false;
@@ -6946,6 +7661,7 @@ function updateIterationHistory(): void {
             container as HTMLElement,
             popupState.pipeline.iterationHistory,
             popupState.pipeline.iterationCount,
+            popupState.historyLoaded,
         );
     }
 }
@@ -7058,6 +7774,7 @@ export async function openSettingsModal(onClose?: () => void): Promise<void> {
 function buildSettingsContent(): string {
     const settings = getSettings();
     const config = settings.generationConfig;
+    const { moment } = SillyTavern.libs;
 
     return `
     <div class="${MODULE_NAME}_settings_modal" id="${MODULE_NAME}_settings_modal">
@@ -7203,6 +7920,25 @@ function buildSettingsContent(): string {
         </div>
       </div>
 
+      <!-- Keyboard Shortcuts -->
+      <div class="${MODULE_NAME}_settings_section">
+        <div class="${MODULE_NAME}_settings_section_header">
+          <i class="fa-solid fa-keyboard"></i>
+          <span>Keyboard Shortcuts</span>
+        </div>
+
+        <div class="${MODULE_NAME}_shortcuts_list">
+          <div class="${MODULE_NAME}_shortcut_item">
+            <kbd>Ctrl</kbd> + <kbd>Enter</kbd>
+            <span>Run current stage</span>
+          </div>
+          <div class="${MODULE_NAME}_shortcut_item">
+            <kbd>Escape</kbd>
+            <span>Cancel generation</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Debug -->
       <div class="${MODULE_NAME}_settings_section">
         <div class="${MODULE_NAME}_settings_section_header">
@@ -7240,6 +7976,11 @@ function buildSettingsContent(): string {
           <div id="${MODULE_NAME}_debug_log_list" class="${MODULE_NAME}_debug_log_list"></div>
           <pre id="${MODULE_NAME}_debug_log_detail" class="${MODULE_NAME}_debug_log_detail">Select a log entry</pre>
         </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="${MODULE_NAME}_settings_footer">
+        <span class="${MODULE_NAME}_settings_version">v1.0.0 • Last updated: ${moment().format('YYYY-MM-DD HH:mm:ss')}</span>
       </div>
     </div>
   `;
@@ -7432,9 +8173,9 @@ function initSettingsListeners(): void {
 }
 
 function handleDeletePreset(type: 'prompt' | 'schema', id: string): void {
-    const success = type === 'prompt' ? deletePromptPreset(id) : deleteSchemaPreset(id);
+    const deletedId = type === 'prompt' ? deletePromptPreset(id) : deleteSchemaPreset(id);
 
-    if (success) {
+    if (deletedId) {
         toastr.success('Preset deleted');
         refreshPresetLists();
     } else {
@@ -7596,8 +8337,25 @@ function escapeHtml(value: unknown): string {
 // Character search and preview component
 
 import { MODULE_NAME } from '../../constants';
-import { getPopulatedFields } from '../../character';
+import { getPopulatedFields } from '../../pipeline';
 import type { Character, PopulatedField } from '../../types';
+
+// ============================================================================
+// TOKEN CACHE
+// ============================================================================
+
+const tokenCache = new Map<string, number>();
+
+function getTokenCacheKey(content: string): string {
+    // Simple hash for cache key
+    let hash = 0;
+    for (let i = 0; i < content.length; i++) {
+        const char = content.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+    }
+    return `${hash}_${content.length}`;
+}
 
 // ============================================================================
 // RENDER
@@ -7726,21 +8484,43 @@ export function updateCharacterSelectState(
 }
 
 /**
- * Update token counts for character fields and total
+ * Update token counts for character fields and total.
+ * Uses parallel execution and caching for performance.
  */
 export async function updateFieldTokenCounts(container: HTMLElement, fields: PopulatedField[]): Promise<void> {
     const { getTokenCountAsync } = SillyTavern.getContext();
 
+    // Build array of promises for parallel execution
+    const tokenPromises = fields.map(async (field) => {
+        const cacheKey = getTokenCacheKey(field.value);
+
+        // Check cache first
+        if (tokenCache.has(cacheKey)) {
+            return { field, tokens: tokenCache.get(cacheKey)! };
+        }
+
+        try {
+            const tokens = await getTokenCountAsync(field.value);
+            tokenCache.set(cacheKey, tokens);
+            return { field, tokens };
+        } catch {
+            return { field, tokens: null };
+        }
+    });
+
+    // Execute all in parallel
+    const results = await Promise.all(tokenPromises);
+
+    // Update UI with results
     let totalTokens = 0;
 
-    for (const field of fields) {
+    for (const { field, tokens } of results) {
         const tokenSpan = container.querySelector(`.${MODULE_NAME}_field_tokens[data-field="${field.key}"]`);
         if (tokenSpan) {
-            try {
-                const tokens = await getTokenCountAsync(field.value);
+            if (tokens !== null) {
                 totalTokens += tokens;
                 tokenSpan.textContent = `${tokens.toLocaleString()}t`;
-            } catch {
+            } else {
                 tokenSpan.textContent = '?';
             }
         }
@@ -7783,6 +8563,12 @@ export function renderDropdownItems(
       </div>
     `;
     }).join('');
+
+    // Scroll selected item into view
+    if (selectedIndex >= 0) {
+        const selectedItem = dropdown.querySelector(`.${MODULE_NAME}_dropdown_item.selected`);
+        selectedItem?.scrollIntoView({ block: 'nearest' });
+    }
 }
 
 // ============================================================================
@@ -8155,7 +8941,10 @@ export function renderStageConfig(
 // ============================================================================
 // UPDATE STATE
 // ============================================================================
-// Export this new handler
+
+/**
+ * Handle schema generation from description
+ */
 export async function handleGenerateSchema(): Promise<string | null> {
     const { Popup, POPUP_RESULT } = SillyTavern.getContext();
 
@@ -8169,21 +8958,47 @@ export async function handleGenerateSchema(): Promise<string | null> {
         return null;
     }
 
-    toastr.info('Generating schema...');
+    // Show loading overlay
+    showSchemaGenerationLoading(true);
 
-    const result = await generateSchemaFromDescription(description);
+    try {
+        toastr.info('Generating schema...');
 
-    if (result.success) {
-        toastr.success('Schema generated!');
-        return result.schema!;
-    } else {
-        toastr.error(result.error || 'Generation failed');
-        // Return the broken schema anyway so they can see/fix it
-        return result.schema || null;
+        const result = await generateSchemaFromDescription(description);
+
+        if (result.success) {
+            toastr.success('Schema generated!');
+            return result.schema!;
+        } else {
+            toastr.error(result.error || 'Generation failed');
+            // Return the broken schema anyway so they can see/fix it
+            return result.schema || null;
+        }
+    } finally {
+        showSchemaGenerationLoading(false);
     }
 }
 
+/**
+ * Show/hide loading overlay for schema generation
+ */
+function showSchemaGenerationLoading(show: boolean): void {
+    const existingOverlay = document.querySelector(`.${MODULE_NAME}_loading_overlay`);
 
+    if (show && !existingOverlay) {
+        const overlay = document.createElement('div');
+        overlay.className = `${MODULE_NAME}_loading_overlay`;
+        overlay.innerHTML = `
+            <div class="${MODULE_NAME}_loading_content">
+                <i class="fa-solid fa-spinner fa-spin fa-2x"></i>
+                <p>Generating schema...</p>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    } else if (!show && existingOverlay) {
+        existingOverlay.remove();
+    }
+}
 
 export function updateStageConfigState(
     container: HTMLElement,
@@ -8314,7 +9129,7 @@ function updateSchemaActionButtons(container: HTMLElement, schemaContent: string
 // SCHEMA ACTION HANDLERS (called from popup.ts)
 // ============================================================================
 
-export function handleValidateSchema(schemaContent: string): void {
+export async function handleValidateSchema(schemaContent: string): Promise<void> {
     if (!schemaContent.trim()) {
         toastr.warning('No schema to validate');
         return;
@@ -8327,13 +9142,36 @@ export function handleValidateSchema(schemaContent: string): void {
         return;
     }
 
+    // For warnings/info with more than 2 items, use Popup instead of toastr
+    const { Popup, POPUP_TYPE } = SillyTavern.getContext();
+
     if (validation.warnings?.length) {
-        toastr.warning(`Valid with ${validation.warnings.length} warning(s):\n${validation.warnings.join('\n')}`);
+        if (validation.warnings.length > 2) {
+            const content = `
+                <h3>Schema Valid with Warnings</h3>
+                <ul>
+                    ${validation.warnings.map(w => `<li>${w}</li>`).join('')}
+                </ul>
+            `;
+            await new Popup(content, POPUP_TYPE.TEXT, '', { wide: false }).show();
+        } else {
+            toastr.warning(`Valid with ${validation.warnings.length} warning(s):\n${validation.warnings.join('\n')}`);
+        }
         return;
     }
 
     if (validation.info?.length) {
-        toastr.success(`Valid!\n${validation.info.join('\n')}`);
+        if (validation.info.length > 2) {
+            const content = `
+                <h3>Schema Valid</h3>
+                <ul>
+                    ${validation.info.map(i => `<li>${i}</li>`).join('')}
+                </ul>
+            `;
+            await new Popup(content, POPUP_TYPE.TEXT, '', { wide: false }).show();
+        } else {
+            toastr.success(`Valid!\n${validation.info.join('\n')}`);
+        }
     } else {
         toastr.success('Schema is valid!');
     }
@@ -8671,14 +9509,13 @@ function renderResult(stage: StageName, result: StageResult): string {
           ${result.locked ? `<span class="${MODULE_NAME}_badge ${MODULE_NAME}_badge_locked"><i class="fa-solid fa-lock"></i> Locked</span>` : ''}
         </div>
         <div class="${MODULE_NAME}_results_actions">
-          ${result.locked
-        ? `<button id="${MODULE_NAME}_unlock_btn" class="${MODULE_NAME}_icon_btn" title="Unlock for editing">
-                <i class="fa-solid fa-lock-open"></i>
-              </button>`
-        : `<button id="${MODULE_NAME}_lock_btn" class="${MODULE_NAME}_icon_btn" title="Lock result">
-                <i class="fa-solid fa-lock"></i>
-              </button>`
-}
+          <!-- Always render BOTH buttons, use hidden class based on locked state -->
+          <button id="${MODULE_NAME}_lock_btn" class="${MODULE_NAME}_icon_btn ${result.locked ? 'hidden' : ''}" title="Lock result">
+            <i class="fa-solid fa-lock"></i>
+          </button>
+          <button id="${MODULE_NAME}_unlock_btn" class="${MODULE_NAME}_icon_btn ${result.locked ? '' : 'hidden'}" title="Unlock for editing">
+            <i class="fa-solid fa-lock-open"></i>
+          </button>
           <button id="${MODULE_NAME}_copy_btn" class="${MODULE_NAME}_icon_btn" title="Copy to clipboard">
             <i class="fa-solid fa-copy"></i>
           </button>
@@ -8767,16 +9604,13 @@ export function updateResultsPanelState(
         footer.innerHTML = renderFooterActions(stage, result, nextStage, pipeline);
     }
 
-    // Update lock button state
+    // Update lock/unlock button visibility
     const lockBtn = container.querySelector(`#${MODULE_NAME}_lock_btn`);
     const unlockBtn = container.querySelector(`#${MODULE_NAME}_unlock_btn`);
 
-    if (result?.locked) {
-        lockBtn?.classList.add('hidden');
-        unlockBtn?.classList.remove('hidden');
-    } else {
-        lockBtn?.classList.remove('hidden');
-        unlockBtn?.classList.add('hidden');
+    if (lockBtn && unlockBtn) {
+        lockBtn.classList.toggle('hidden', !!result?.locked);
+        unlockBtn.classList.toggle('hidden', !result?.locked);
     }
 }
 
@@ -8799,6 +9633,16 @@ function renderFooterActions(
     }
 
     // Stage-specific actions
+    if (stage === 'rewrite' && pipeline.character) {
+        // Apply to Character button - the primary action for rewrite stage
+        actions.push(`
+      <button id="${MODULE_NAME}_apply_btn" class="menu_button ${MODULE_NAME}_apply_btn">
+        <i class="fa-solid fa-check-double"></i>
+        <span>Apply to Character</span>
+      </button>
+    `);
+    }
+
     if (stage === 'analyze') {
         const verdict = extractVerdict(result.response);
         const canRefineResult = canRefine(pipeline);
@@ -8866,15 +9710,28 @@ import type { IterationSnapshot, IterationVerdict } from '../../types';
 
 /**
  * Render the iteration history panel
+ * @param history - Array of iteration snapshots
+ * @param currentIteration - Current iteration number
+ * @param historyLoaded - Whether history has been loaded from persistence
  */
 export function renderIterationHistory(
     history: IterationSnapshot[],
     currentIteration: number,
-    onRevert: (index: number) => void,
+    historyLoaded: boolean,
 ): string {
     if (history.length === 0 && currentIteration === 0) {
         return '';
     }
+
+    // Show loading state while history is being loaded from localforage
+    const listContent = !historyLoaded
+        ? `<div class="${MODULE_NAME}_iteration_loading">
+             <i class="fa-solid fa-spinner fa-spin"></i>
+             <span>Loading history...</span>
+           </div>`
+        : history.length === 0
+            ? `<div class="${MODULE_NAME}_iteration_empty">No previous iterations</div>`
+            : history.map((snap, i) => renderIterationItem(snap, i)).join('');
 
     return `
     <div class="${MODULE_NAME}_iteration_history" id="${MODULE_NAME}_iteration_history">
@@ -8884,16 +9741,13 @@ export function renderIterationHistory(
         <span class="${MODULE_NAME}_iteration_count">${currentIteration > 0 ? `Current: #${currentIteration + 1}` : 'Initial'}</span>
       </div>
       <div class="${MODULE_NAME}_iteration_list">
-        ${history.length === 0
-        ? `<div class="${MODULE_NAME}_iteration_empty">No previous iterations</div>`
-        : history.map((snap, i) => renderIterationItem(snap, i, history.length)).join('')
-}
+        ${listContent}
       </div>
     </div>
   `;
 }
 
-function renderIterationItem(snap: IterationSnapshot, index: number, total: number): string {
+function renderIterationItem(snap: IterationSnapshot, index: number): string {
     const verdictIcon = getVerdictIcon(snap.verdict);
     const verdictClass = getVerdictClass(snap.verdict);
     const time = new Date(snap.timestamp).toLocaleTimeString();
@@ -8966,12 +9820,13 @@ export function updateIterationHistoryState(
     container: HTMLElement,
     history: IterationSnapshot[],
     currentIteration: number,
+    historyLoaded: boolean,
 ): void {
     const historyEl = container.querySelector(`#${MODULE_NAME}_iteration_history`);
 
     if (!historyEl && (history.length > 0 || currentIteration > 0)) {
         // Need to add history panel
-        const html = renderIterationHistory(history, currentIteration, () => {});
+        const html = renderIterationHistory(history, currentIteration, historyLoaded);
         container.insertAdjacentHTML('beforeend', html);
     } else if (historyEl) {
         // Update existing
@@ -8982,10 +9837,15 @@ export function updateIterationHistoryState(
 
         const listEl = historyEl.querySelector(`.${MODULE_NAME}_iteration_list`);
         if (listEl) {
-            if (history.length === 0) {
+            if (!historyLoaded) {
+                listEl.innerHTML = `<div class="${MODULE_NAME}_iteration_loading">
+                    <i class="fa-solid fa-spinner fa-spin"></i>
+                    <span>Loading history...</span>
+                </div>`;
+            } else if (history.length === 0) {
                 listEl.innerHTML = `<div class="${MODULE_NAME}_iteration_empty">No previous iterations</div>`;
             } else {
-                listEl.innerHTML = history.map((snap, i) => renderIterationItem(snap, i, history.length)).join('');
+                listEl.innerHTML = history.map((snap, i) => renderIterationItem(snap, i)).join('');
             }
         }
     }
@@ -8995,6 +9855,8 @@ export function updateIterationHistoryState(
  * Render iteration view modal content
  */
 export function renderIterationViewContent(snap: IterationSnapshot): string {
+    const { moment } = SillyTavern.libs;
+
     return `
     <div class="${MODULE_NAME}_iteration_view">
       <div class="${MODULE_NAME}_iteration_view_header">
@@ -9003,7 +9865,7 @@ export function renderIterationViewContent(snap: IterationSnapshot): string {
           <i class="fa-solid ${getVerdictIcon(snap.verdict)}"></i>
           ${formatVerdict(snap.verdict)}
         </span>
-        <span class="${MODULE_NAME}_iteration_time">${new Date(snap.timestamp).toLocaleString()}</span>
+        <span class="${MODULE_NAME}_iteration_time">${moment(snap.timestamp).format('YYYY-MM-DD HH:mm:ss')}</span>
       </div>
 
       <div class="${MODULE_NAME}_iteration_view_section">
@@ -9043,7 +9905,9 @@ function escapeHtml(value: unknown): string {
       <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
     </div>
     <div class="inline-drawer-content">
-
+      <div class="character_tools_panel_version">
+        <small class="opacity50">v1.0.0</small>
+      </div>
       <!-- Quick Launch -->
       <div class="character_tools_panel_launch">
         <button id="character_tools_open_btn" class="menu_button menu_button_icon wide100p">
@@ -9070,7 +9934,7 @@ function escapeHtml(value: unknown): string {
 
 ## FILE: style.css
 ```css
-/* style.css - Character Tools Extension v2 */
+/* style.css - Character Tools Extension v1.0.0 */
 
 /* ============================================================================
    VARIABLES - Extension-specific only, inherit ST for everything else
@@ -9107,6 +9971,11 @@ function escapeHtml(value: unknown): string {
   gap: var(--ct-spacing-xs);
 }
 
+.character_tools_panel_version {
+  text-align: right;
+  margin-bottom: var(--ct-spacing-sm);
+}
+
 /* ============================================================================
    POPUP - LAYOUT
    ============================================================================ */
@@ -9121,13 +9990,20 @@ function escapeHtml(value: unknown): string {
   font-family: var(--mainFontFamily);
 }
 
-/* Header */
+/* Header - Sticky */
 .character_tools_popup_header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding-bottom: var(--ct-spacing-md);
   border-bottom: 1px solid var(--SmartThemeBorderColor);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--SmartThemeBlurTintColor);
+  margin: calc(-1 * var(--ct-spacing-lg)) calc(-1 * var(--ct-spacing-lg)) 0;
+  padding: var(--ct-spacing-lg);
+  padding-bottom: var(--ct-spacing-md);
 }
 
 .character_tools_popup_title {
@@ -9137,12 +10013,14 @@ function escapeHtml(value: unknown): string {
   font-size: 1.3em;
   font-weight: 600;
   color: var(--SmartThemeBodyColor);
+  flex-shrink: 0;
 }
 
 .character_tools_popup_header_right {
   display: flex;
   align-items: center;
   gap: var(--ct-spacing-md);
+  flex-shrink: 0;
 }
 
 .character_tools_api_status {
@@ -9159,11 +10037,11 @@ function escapeHtml(value: unknown): string {
 }
 
 .character_tools_api_status.connected i {
-  color: var(--success);
+  color: var(--success, #2ecc71);
 }
 
 .character_tools_api_status.disconnected i {
-  color: var(--failure);
+  color: var(--failure, #e74c3c);
 }
 
 /* Sections */
@@ -9194,7 +10072,7 @@ function escapeHtml(value: unknown): string {
 }
 
 /* ============================================================================
-   ICON BUTTON
+   ICON BUTTON - Theme Agnostic
    ============================================================================ */
 
 .character_tools_icon_btn {
@@ -9211,6 +10089,7 @@ function escapeHtml(value: unknown): string {
   color: var(--SmartThemeBodyColor);
   opacity: 0.6;
   transition: all var(--ct-transition);
+  flex-shrink: 0;
 }
 
 .character_tools_icon_btn:hover {
@@ -9221,6 +10100,48 @@ function escapeHtml(value: unknown): string {
 .character_tools_icon_btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+.character_tools_icon_btn.hidden {
+  display: none;
+}
+
+/* ============================================================================
+   MENU BUTTON OVERRIDES - Ensure theme consistency
+   ============================================================================ */
+
+.character_tools_popup .menu_button,
+.character_tools_settings_modal .menu_button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ct-spacing-xs);
+  padding: var(--ct-spacing-sm) var(--ct-spacing-md);
+  background: var(--SmartThemeBlurTintColor);
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: var(--ct-radius-md);
+  color: var(--SmartThemeBodyColor);
+  font-family: var(--mainFontFamily);
+  font-size: 0.9em;
+  cursor: pointer;
+  transition: all var(--ct-transition);
+  white-space: nowrap;
+}
+
+.character_tools_popup .menu_button:hover,
+.character_tools_settings_modal .menu_button:hover {
+  background: var(--SmartThemeBorderColor);
+}
+
+.character_tools_popup .menu_button:disabled,
+.character_tools_settings_modal .menu_button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.character_tools_popup .menu_button i,
+.character_tools_settings_modal .menu_button i {
+  font-size: 0.9em;
 }
 
 /* ============================================================================
@@ -9262,6 +10183,10 @@ function escapeHtml(value: unknown): string {
   position: relative;
 }
 
+.character_tools_search_wrapper.hidden {
+  display: none;
+}
+
 .character_tools_search_container {
   position: relative;
   display: flex;
@@ -9295,7 +10220,7 @@ function escapeHtml(value: unknown): string {
   border-top: none;
   border-radius: 0 0 var(--ct-radius-lg) var(--ct-radius-lg);
   z-index: 1000;
-  box-shadow: 0 8px 24px var(--SmartThemeShadowColor, rgba(0, 0, 0, 0.5));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
 .character_tools_dropdown.hidden {
@@ -9392,6 +10317,7 @@ function escapeHtml(value: unknown): string {
 .character_tools_char_info {
   flex: 1;
   min-width: 0;
+  text-align: left;
 }
 
 .character_tools_char_name {
@@ -9428,6 +10354,7 @@ function escapeHtml(value: unknown): string {
   cursor: pointer;
   transition: background var(--ct-transition);
   color: var(--SmartThemeBodyColor);
+  text-align: left;
 }
 
 .character_tools_field_header:hover {
@@ -9439,11 +10366,13 @@ function escapeHtml(value: unknown): string {
   opacity: 0.5;
   width: 12px;
   transition: transform var(--ct-transition);
+  flex-shrink: 0;
 }
 
 .character_tools_field_label {
   flex: 1;
   font-weight: 500;
+  text-align: left;
 }
 
 .character_tools_field_tokens {
@@ -9451,12 +10380,18 @@ function escapeHtml(value: unknown): string {
   opacity: 0.7;
   font-family: var(--monoFontFamily);
   color: var(--SmartThemeBodyColor);
+  text-align: right;
+  flex-shrink: 0;
 }
 
 .character_tools_field_content {
   padding: var(--ct-spacing-sm) var(--ct-spacing-md) var(--ct-spacing-md);
   padding-left: calc(var(--ct-spacing-md) + 20px);
   background: var(--SmartThemeChatTintColor);
+}
+
+.character_tools_field_content.hidden {
+  display: none;
 }
 
 .character_tools_field_text {
@@ -9483,7 +10418,7 @@ function escapeHtml(value: unknown): string {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--ct-spacing-xs);
+  gap: var(--ct-spacing-sm);
 }
 
 .character_tools_stage_node {
@@ -9498,6 +10433,7 @@ function escapeHtml(value: unknown): string {
   height: 16px;
   cursor: pointer;
   accent-color: var(--SmartThemeQuoteColor);
+  flex-shrink: 0;
 }
 
 /* Stage Button */
@@ -9532,11 +10468,11 @@ function escapeHtml(value: unknown): string {
 }
 
 .character_tools_stage_complete .character_tools_status_icon {
-  color: var(--success);
+  color: var(--success, #2ecc71);
 }
 
 .character_tools_stage_running .character_tools_status_icon {
-  color: var(--warning);
+  color: var(--warning, #f39c12);
 }
 
 /* Stage Connector */
@@ -9545,6 +10481,7 @@ function escapeHtml(value: unknown): string {
   height: 2px;
   background: var(--SmartThemeBorderColor);
   margin: 0 4px;
+  flex-shrink: 0;
 }
 
 .character_tools_stage_connector.active {
@@ -9556,6 +10493,11 @@ function escapeHtml(value: unknown): string {
   display: flex;
   gap: var(--ct-spacing-sm);
   flex-wrap: wrap;
+}
+
+.character_tools_pipeline_actions .menu_button {
+  padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
+  font-size: 0.85em;
 }
 
 /* ============================================================================
@@ -9578,13 +10520,17 @@ function escapeHtml(value: unknown): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--ct-spacing-md);
+  gap: var(--ct-spacing-sm);
+  min-width: 0;
 }
 
 .character_tools_config_header_actions {
   display: flex;
   align-items: center;
-  gap: var(--ct-spacing-sm);
+  gap: var(--ct-spacing-xs);
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .character_tools_config_header_actions .character_tools_icon_btn {
@@ -9592,19 +10538,19 @@ function escapeHtml(value: unknown): string {
   height: 28px;
 }
 
-.character_tools_config_header_actions .character_tools_icon_btn:disabled {
-  opacity: 0.3;
-}
-
 .character_tools_config_label {
   font-weight: 500;
   font-size: 0.9em;
   color: var(--SmartThemeBodyColor);
+  flex-shrink: 0;
 }
 
 .character_tools_preset_select {
   width: auto;
-  min-width: 180px;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 120px;
+  text-overflow: ellipsis;
 }
 
 .character_tools_prompt_textarea {
@@ -9654,18 +10600,18 @@ function escapeHtml(value: unknown): string {
 }
 
 .character_tools_schema_status.success {
-  color: var(--success);
-  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success, #2ecc71);
+  background: rgba(46, 204, 113, 0.15);
 }
 
 .character_tools_schema_status.warning {
-  color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 15%, transparent);
+  color: var(--warning, #f39c12);
+  background: rgba(243, 156, 18, 0.15);
 }
 
 .character_tools_schema_status.error {
-  color: var(--failure);
-  background: color-mix(in srgb, var(--failure) 15%, transparent);
+  color: var(--failure, #e74c3c);
+  background: rgba(231, 76, 60, 0.15);
 }
 
 .character_tools_schema_status.info {
@@ -9684,10 +10630,6 @@ function escapeHtml(value: unknown): string {
 .character_tools_schema_actions .menu_button {
   padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
   font-size: 0.85em;
-}
-
-.character_tools_schema_actions .menu_button i {
-  margin-right: var(--ct-spacing-xs);
 }
 
 /* Config Actions */
@@ -9710,12 +10652,12 @@ function escapeHtml(value: unknown): string {
 }
 
 .character_tools_token_estimate.warning {
-  color: var(--warning);
+  color: var(--warning, #f39c12);
   opacity: 1;
 }
 
 .character_tools_token_estimate.danger {
-  color: var(--failure);
+  color: var(--failure, #e74c3c);
   opacity: 1;
 }
 
@@ -9743,6 +10685,7 @@ function escapeHtml(value: unknown): string {
   width: 16px;
   height: 16px;
   accent-color: var(--SmartThemeQuoteColor);
+  flex-shrink: 0;
 }
 
 /* ============================================================================
@@ -9767,21 +10710,13 @@ function escapeHtml(value: unknown): string {
 }
 
 .character_tools_results_placeholder i,
-.character_tools_results_loading i:not(.fa-spinner) {
+.character_tools_results_loading i.fa-2x {
   font-size: 2em;
 }
 
-.character_tools_spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid var(--SmartThemeBorderColor);
-  border-top-color: var(--SmartThemeQuoteColor);
-  border-radius: 50%;
-  animation: character_tools_spin 0.8s linear infinite;
-}
-
-@keyframes character_tools_spin {
-  to { transform: rotate(360deg); }
+/* Cancel button in loading state */
+.character_tools_results_loading .menu_button {
+  margin-top: var(--ct-spacing-sm);
 }
 
 /* Results Content */
@@ -9801,6 +10736,8 @@ function escapeHtml(value: unknown): string {
   padding: var(--ct-spacing-sm) var(--ct-spacing-md);
   background: var(--SmartThemeChatTintColor);
   border-bottom: 1px solid var(--SmartThemeBorderColor);
+  flex-wrap: wrap;
+  gap: var(--ct-spacing-sm);
 }
 
 .character_tools_results_info {
@@ -9808,6 +10745,7 @@ function escapeHtml(value: unknown): string {
   align-items: center;
   gap: var(--ct-spacing-sm);
   font-size: 0.85em;
+  flex-wrap: wrap;
 }
 
 .character_tools_results_time {
@@ -9840,9 +10778,31 @@ function escapeHtml(value: unknown): string {
   flex-wrap: wrap;
 }
 
+.character_tools_footer_actions .menu_button {
+  padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
+  font-size: 0.85em;
+}
+
+/* Continue Button - Prominent */
 .character_tools_continue_btn {
   background: var(--SmartThemeQuoteColor) !important;
   color: var(--SmartThemeBlurTintColor) !important;
+  border-color: var(--SmartThemeQuoteColor) !important;
+}
+
+.character_tools_continue_btn:hover {
+  filter: brightness(1.1);
+}
+
+/* Apply Button - Primary Action */
+.character_tools_apply_btn {
+  background: var(--success, #2ecc71) !important;
+  color: #fff !important;
+  border-color: var(--success, #2ecc71) !important;
+}
+
+.character_tools_apply_btn:hover {
+  filter: brightness(1.1);
 }
 
 /* ============================================================================
@@ -9901,6 +10861,7 @@ function escapeHtml(value: unknown): string {
   align-items: center;
   justify-content: space-between;
   gap: var(--ct-spacing-md);
+  flex-wrap: wrap;
 }
 
 .character_tools_settings_grid {
@@ -9910,7 +10871,9 @@ function escapeHtml(value: unknown): string {
 }
 
 .character_tools_settings_grid_5 {
-  grid-template-columns: repeat(5, 1fr);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+  gap: var(--ct-spacing-sm);
 }
 
 .character_tools_settings_field {
@@ -9925,10 +10888,45 @@ function escapeHtml(value: unknown): string {
   color: var(--SmartThemeBodyColor);
 }
 
+.character_tools_settings_field .text_pole {
+  min-width: 0;
+  width: 100%;
+}
+
 .character_tools_system_prompt_textarea {
   resize: vertical;
   min-height: 100px;
   font-size: 0.9em;
+}
+
+/* Keyboard Shortcuts */
+.character_tools_shortcuts_list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-spacing-sm);
+}
+
+.character_tools_shortcut_item {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-spacing-sm);
+  font-size: 0.9em;
+  color: var(--SmartThemeBodyColor);
+}
+
+.character_tools_shortcut_item kbd {
+  display: inline-block;
+  padding: 3px 8px;
+  font-family: var(--monoFontFamily);
+  font-size: 0.85em;
+  background: var(--SmartThemeChatTintColor);
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: var(--ct-radius-sm);
+  box-shadow: 0 1px 0 var(--SmartThemeBorderColor);
+}
+
+.character_tools_shortcut_item span {
+  opacity: 0.7;
 }
 
 /* Presets */
@@ -9943,6 +10941,7 @@ function escapeHtml(value: unknown): string {
   font-size: 0.9em;
   opacity: 0.8;
   color: var(--SmartThemeBodyColor);
+  text-align: center;
 }
 
 .character_tools_preset_list {
@@ -9985,7 +10984,7 @@ function escapeHtml(value: unknown): string {
 .character_tools_preset_delete {
   background: none;
   border: none;
-  color: var(--failure);
+  color: var(--failure, #e74c3c);
   cursor: pointer;
   padding: var(--ct-spacing-xs);
   opacity: 0.6;
@@ -10071,6 +11070,19 @@ function escapeHtml(value: unknown): string {
   color: var(--SmartThemeBodyColor);
 }
 
+/* Settings Footer */
+.character_tools_settings_footer {
+  padding-top: var(--ct-spacing-md);
+  border-top: 1px solid var(--SmartThemeBorderColor);
+  text-align: center;
+}
+
+.character_tools_settings_version {
+  font-size: 0.8em;
+  opacity: 0.5;
+  color: var(--SmartThemeBodyColor);
+}
+
 /* ============================================================================
    STRUCTURED OUTPUT FORMATTING
    ============================================================================ */
@@ -10116,8 +11128,6 @@ function escapeHtml(value: unknown): string {
 .character_tools_field:last-child {
   margin-bottom: 0;
 }
-
-/* Note: .character_tools_field_label is also used in char select, keep consistent */
 
 .character_tools_field_value {
   line-height: 1.5;
@@ -10192,11 +11202,11 @@ function escapeHtml(value: unknown): string {
 }
 
 .character_tools_yes {
-  color: var(--success);
+  color: var(--success, #2ecc71);
 }
 
 .character_tools_no {
-  color: var(--failure);
+  color: var(--failure, #e74c3c);
 }
 
 .character_tools_null,
@@ -10345,173 +11355,6 @@ function escapeHtml(value: unknown): string {
 }
 
 /* ============================================================================
-   UTILITIES
-   ============================================================================ */
-
-.hidden {
-  display: none !important;
-}
-
-.character_tools_api_status.connected i {
-  color: var(--success, #2ecc71);
-}
-
-.character_tools_api_status.disconnected i {
-  color: var(--failure, #e74c3c);
-}
-
-/* Fix preset select - constrain width, show arrow */
-.character_tools_preset_select {
-  width: auto;
-  min-width: 150px;
-  max-width: 220px;
-  text-overflow: ellipsis;
-  padding-right: 24px !important; /* Room for arrow */
-}
-
-/* Fix character fields - left align */
-.character_tools_field_header {
-  display: flex;
-  align-items: center;
-  gap: var(--ct-spacing-sm);
-  padding: var(--ct-spacing-sm) var(--ct-spacing-md);
-  cursor: pointer;
-  transition: background var(--ct-transition);
-  color: var(--SmartThemeBodyColor);
-  text-align: left;
-}
-
-.character_tools_field_label {
-  flex: 1;
-  font-weight: 500;
-  text-align: left;
-}
-
-.character_tools_field_tokens {
-  font-size: 0.8em;
-  opacity: 0.7;
-  font-family: var(--monoFontFamily);
-  color: var(--SmartThemeBodyColor);
-  text-align: right;
-  flex-shrink: 0;
-}
-
-/* Fix character header - left align name */
-.character_tools_char_info {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-}
-
-/* Fix pipeline action buttons - smaller, no wrap */
-.character_tools_pipeline_actions {
-  display: flex;
-  gap: var(--ct-spacing-xs);
-  flex-wrap: nowrap;
-}
-
-.character_tools_pipeline_actions .menu_button {
-  padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
-  font-size: 0.85em;
-  white-space: nowrap;
-}
-
-.character_tools_pipeline_actions .menu_button i {
-  margin-right: 4px;
-}
-
-.character_tools_pipeline_actions .menu_button span {
-  display: inline;
-}
-
-/* Fix settings buttons - smaller */
-.character_tools_settings_row_spread .menu_button,
-.character_tools_debug_actions .menu_button {
-  padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
-  font-size: 0.85em;
-}
-
-/* Fix settings grid on small widths */
-.character_tools_settings_grid_5 {
-  grid-template-columns: repeat(5, 1fr);
-  gap: var(--ct-spacing-sm);
-}
-
-.character_tools_settings_grid_5 .text_pole {
-  min-width: 0;
-  width: 100%;
-}
-
-/* Fix footer actions - smaller buttons */
-.character_tools_footer_actions .menu_button {
-  padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
-  font-size: 0.85em;
-}
-
-/* Fix config header actions alignment */
-.character_tools_config_header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ct-spacing-sm);
-}
-
-.character_tools_config_header_actions {
-  display: flex;
-  align-items: center;
-  gap: var(--ct-spacing-xs);
-  flex-shrink: 0;
-}
-
-/* Settings modal buttons - single line, proper sizing */
-.character_tools_settings_modal .menu_button {
-  white-space: nowrap;
-  padding: var(--ct-spacing-sm) var(--ct-spacing-md);
-  font-size: 0.9em;
-}
-
-/* Export/Import row - flex with gap */
-.character_tools_settings_row_spread {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ct-spacing-md);
-  flex-wrap: wrap;
-}
-
-/* Debug actions - horizontal, no wrap on buttons */
-.character_tools_debug_actions {
-  display: flex;
-  gap: var(--ct-spacing-sm);
-  flex-wrap: wrap;
-}
-
-.character_tools_debug_actions .menu_button {
-  white-space: nowrap;
-}
-
-/* Settings grid 5 columns - give more room on smaller widths */
-.character_tools_settings_grid_5 {
-  grid-template-columns: repeat(5, minmax(60px, 1fr));
-  gap: var(--ct-spacing-sm);
-}
-
-/* Preset columns - ensure headers don't center */
-.character_tools_preset_column h4 {
-  margin: 0 0 var(--ct-spacing-sm);
-  font-size: 0.9em;
-  opacity: 0.8;
-  color: var(--SmartThemeBodyColor);
-  text-align: center;
-}
-
-/* Global fix - all menu buttons in the extension get icon spacing */
-.character_tools_settings_modal .menu_button i,
-.character_tools_popup .menu_button i {
-  margin-right: var(--ct-spacing-xs);
-}
-
-/* ============================================================================
    ITERATION SYSTEM
    ============================================================================ */
 
@@ -10565,12 +11408,20 @@ function escapeHtml(value: unknown): string {
   overflow-y: auto;
 }
 
-.character_tools_iteration_empty {
+.character_tools_iteration_empty,
+.character_tools_iteration_loading {
   padding: var(--ct-spacing-md);
   text-align: center;
   opacity: 0.5;
   font-size: 0.9em;
   color: var(--SmartThemeBodyColor);
+}
+
+.character_tools_iteration_loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ct-spacing-sm);
 }
 
 /* Iteration Item */
@@ -10593,6 +11444,7 @@ function escapeHtml(value: unknown): string {
   align-items: center;
   gap: var(--ct-spacing-sm);
   margin-bottom: var(--ct-spacing-xs);
+  flex-wrap: wrap;
 }
 
 .character_tools_iteration_num {
@@ -10639,17 +11491,17 @@ function escapeHtml(value: unknown): string {
 /* Verdict Colors */
 .character_tools_verdict_accept .character_tools_iteration_verdict,
 .character_tools_verdict_badge.character_tools_verdict_accept {
-  color: var(--success);
+  color: var(--success, #2ecc71);
 }
 
 .character_tools_verdict_needs_refinement .character_tools_iteration_verdict,
 .character_tools_verdict_badge.character_tools_verdict_needs_refinement {
-  color: var(--warning);
+  color: var(--warning, #f39c12);
 }
 
 .character_tools_verdict_regression .character_tools_iteration_verdict,
 .character_tools_verdict_badge.character_tools_verdict_regression {
-  color: var(--failure);
+  color: var(--failure, #e74c3c);
 }
 
 /* Verdict Badge in Results */
@@ -10666,28 +11518,36 @@ function escapeHtml(value: unknown): string {
 }
 
 .character_tools_verdict_badge.character_tools_verdict_accept {
-  background: color-mix(in srgb, var(--success) 20%, transparent);
+  background: rgba(46, 204, 113, 0.2);
 }
 
 .character_tools_verdict_badge.character_tools_verdict_needs_refinement {
-  background: color-mix(in srgb, var(--warning) 20%, transparent);
+  background: rgba(243, 156, 18, 0.2);
 }
 
 .character_tools_verdict_badge.character_tools_verdict_regression {
-  background: color-mix(in srgb, var(--failure) 20%, transparent);
+  background: rgba(231, 76, 60, 0.2);
 }
 
 /* Refine/Accept Button Styling */
 .character_tools_refine_recommended {
-  background: var(--warning) !important;
-  color: var(--SmartThemeBlurTintColor) !important;
-  border-color: var(--warning) !important;
+  background: var(--warning, #f39c12) !important;
+  color: #fff !important;
+  border-color: var(--warning, #f39c12) !important;
+}
+
+.character_tools_refine_recommended:hover {
+  filter: brightness(1.1);
 }
 
 .character_tools_accept_recommended {
-  background: var(--success) !important;
-  color: var(--SmartThemeBlurTintColor) !important;
-  border-color: var(--success) !important;
+  background: var(--success, #2ecc71) !important;
+  color: #fff !important;
+  border-color: var(--success, #2ecc71) !important;
+}
+
+.character_tools_accept_recommended:hover {
+  filter: brightness(1.1);
 }
 
 .character_tools_iteration_badge {
@@ -10718,6 +11578,7 @@ function escapeHtml(value: unknown): string {
   gap: var(--ct-spacing-md);
   padding-bottom: var(--ct-spacing-md);
   border-bottom: 1px solid var(--SmartThemeBorderColor);
+  flex-wrap: wrap;
 }
 
 .character_tools_iteration_view_header h3 {
@@ -10747,6 +11608,695 @@ function escapeHtml(value: unknown): string {
   white-space: pre-wrap;
   font-size: 0.9em;
   line-height: 1.5;
+}
+
+/* ============================================================================
+   LOADING OVERLAY
+   ============================================================================ */
+
+.character_tools_loading_overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.character_tools_loading_content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ct-spacing-md);
+  padding: var(--ct-spacing-xl);
+  background: var(--SmartThemeBlurTintColor);
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: var(--ct-radius-lg);
+  color: var(--SmartThemeBodyColor);
+}
+
+.character_tools_loading_content p {
+  margin: 0;
+  font-size: 0.95em;
+}
+
+/* ============================================================================
+   APPLY PREVIEW (in confirmation popup)
+   ============================================================================ */
+
+.character_tools_apply_preview {
+  margin-top: var(--ct-spacing-md);
+  padding: var(--ct-spacing-md);
+  background: var(--SmartThemeChatTintColor);
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: var(--ct-radius-md);
+  font-size: 0.9em;
+}
+
+.character_tools_apply_preview p {
+  margin: 0 0 var(--ct-spacing-sm);
+}
+
+.character_tools_apply_preview ul {
+  margin: 0;
+  padding-left: 1.5em;
+}
+
+.character_tools_apply_preview li {
+  margin-bottom: var(--ct-spacing-xs);
+}
+
+.character_tools_apply_preview details {
+  margin-top: var(--ct-spacing-sm);
+}
+
+.character_tools_apply_preview summary {
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.character_tools_apply_preview pre {
+  margin: var(--ct-spacing-sm) 0 0;
+  padding: var(--ct-spacing-sm);
+  background: var(--SmartThemeBlurTintColor);
+  border-radius: var(--ct-radius-sm);
+  font-size: 0.85em;
+  overflow-x: auto;
+  max-height: 150px;
+}
+
+.character_tools_apply_warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ct-spacing-sm);
+  padding: var(--ct-spacing-sm);
+  background: rgba(243, 156, 18, 0.15);
+  border-radius: var(--ct-radius-sm);
+  color: var(--warning, #f39c12);
+}
+
+.character_tools_apply_warning i {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* ============================================================================
+   UTILITIES
+   ============================================================================ */
+
+.hidden {
+  display: none !important;
+}
+
+/* ============================================================================
+   MOBILE - PORTRAIT (max-width: 600px)
+   ============================================================================ */
+
+@media (max-width: 600px) {
+  /* Popup sizing */
+  .character_tools_popup {
+    min-width: unset;
+    width: 100%;
+    max-width: 100%;
+    gap: var(--ct-spacing-md);
+  }
+
+  /* Header adjustments */
+  .character_tools_popup_header {
+    flex-wrap: wrap;
+    gap: var(--ct-spacing-sm);
+    padding: var(--ct-spacing-md);
+    margin: calc(-1 * var(--ct-spacing-md)) calc(-1 * var(--ct-spacing-md)) 0;
+  }
+
+  .character_tools_popup_title {
+    font-size: 1.1em;
+  }
+
+  .character_tools_popup_header_right {
+    gap: var(--ct-spacing-sm);
+  }
+
+  .character_tools_api_status span {
+    display: none;
+  }
+
+  /* Section headers */
+  .character_tools_section_header {
+    font-size: 0.9em;
+  }
+
+  /* Character select */
+  .character_tools_char_header {
+    padding: var(--ct-spacing-sm);
+  }
+
+  .character_tools_char_avatar {
+    width: 40px;
+    height: 40px;
+  }
+
+  .character_tools_char_name {
+    font-size: 1em;
+  }
+
+  .character_tools_char_fields {
+    max-height: 120px;
+  }
+
+  /* Pipeline nav */
+  .character_tools_stage_row {
+    gap: var(--ct-spacing-xs);
+  }
+
+  .character_tools_stage_btn {
+    padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
+    font-size: 0.8em;
+  }
+
+  .character_tools_stage_btn span {
+    display: none;
+  }
+
+  .character_tools_stage_connector {
+    width: 12px;
+    margin: 0 2px;
+  }
+
+  .character_tools_pipeline_actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .character_tools_pipeline_actions .menu_button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Stage config */
+  .character_tools_config_header {
+    flex-wrap: wrap;
+  }
+
+  .character_tools_preset_select {
+    min-width: 100px;
+    max-width: 160px;
+    font-size: 0.85em;
+  }
+
+  .character_tools_prompt_textarea {
+    min-height: 80px;
+    font-size: 0.85em;
+  }
+
+  .character_tools_schema_textarea {
+    min-height: 60px;
+    font-size: 0.8em;
+  }
+
+  .character_tools_schema_actions {
+    flex-wrap: wrap;
+  }
+
+  .character_tools_schema_actions .menu_button {
+    flex: 1 1 auto;
+    min-width: 80px;
+  }
+
+  /* Results */
+  .character_tools_results_body {
+    padding: var(--ct-spacing-sm);
+    max-height: 250px;
+    font-size: 0.9em;
+  }
+
+  .character_tools_results_toolbar {
+    padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
+  }
+
+  .character_tools_results_footer {
+    padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
+  }
+
+  .character_tools_footer_actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .character_tools_footer_actions .menu_button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Iteration history */
+  .character_tools_iteration_list {
+    max-height: 150px;
+  }
+
+  .character_tools_iteration_item_header {
+    font-size: 0.85em;
+  }
+
+  .character_tools_iteration_actions {
+    flex-wrap: wrap;
+  }
+
+  .character_tools_iteration_actions .menu_button {
+    flex: 1;
+  }
+
+  /* Settings modal */
+  .character_tools_settings_modal {
+    min-width: unset;
+    max-width: 100%;
+  }
+
+  .character_tools_settings_grid {
+    grid-template-columns: 1fr;
+  }
+
+  .character_tools_settings_grid_5 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .character_tools_presets_grid {
+    grid-template-columns: 1fr;
+    gap: var(--ct-spacing-md);
+  }
+
+  .character_tools_shortcuts_list {
+    font-size: 0.85em;
+  }
+
+  .character_tools_shortcut_item kbd {
+    padding: 2px 6px;
+    font-size: 0.8em;
+  }
+
+  /* Structured output */
+  .character_tools_hero {
+    flex-direction: column;
+    text-align: center;
+    gap: var(--ct-spacing-sm);
+    padding: var(--ct-spacing-md);
+  }
+
+  .character_tools_hero_value {
+    font-size: 1.5em;
+  }
+
+  .character_tools_card {
+    padding: var(--ct-spacing-sm);
+  }
+
+  /* Markdown */
+  .character_tools_markdown_content h1 {
+    font-size: 1.2em;
+  }
+
+  .character_tools_markdown_content h2 {
+    font-size: 1.1em;
+  }
+
+  .character_tools_markdown_content h3 {
+    font-size: 1em;
+  }
+
+  .character_tools_markdown_content pre {
+    padding: var(--ct-spacing-sm);
+    font-size: 0.8em;
+  }
+
+  .character_tools_markdown_content table {
+    font-size: 0.85em;
+  }
+
+  .character_tools_markdown_content th,
+  .character_tools_markdown_content td {
+    padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
+  }
+}
+
+/* ============================================================================
+   MOBILE - LANDSCAPE (max-height: 500px and orientation: landscape)
+   Prioritize horizontal space, compress vertical
+   ============================================================================ */
+
+@media (max-height: 500px) and (orientation: landscape) {
+  /* Popup - use available width better */
+  .character_tools_popup {
+    gap: var(--ct-spacing-sm);
+    min-width: unset;
+    max-width: 95vw;
+  }
+
+  /* Header - compact but keep all elements visible */
+  .character_tools_popup_header {
+    padding: var(--ct-spacing-xs) var(--ct-spacing-md);
+    margin: calc(-1 * var(--ct-spacing-sm)) calc(-1 * var(--ct-spacing-sm)) 0;
+    gap: var(--ct-spacing-sm);
+  }
+
+  .character_tools_popup_title {
+    font-size: 1em;
+  }
+
+  .character_tools_popup_header_right {
+    gap: var(--ct-spacing-xs);
+  }
+
+  /* Keep API status text visible in landscape - we have width */
+  .character_tools_api_status span {
+    display: inline;
+  }
+
+  .character_tools_icon_btn {
+    width: 28px;
+    height: 28px;
+  }
+
+  /* Sections - tighter */
+  .character_tools_section {
+    gap: var(--ct-spacing-xs);
+  }
+
+  .character_tools_section_header {
+    font-size: 0.85em;
+  }
+
+  /* Character select - minimal height */
+  .character_tools_char_header {
+    padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
+  }
+
+  .character_tools_char_avatar {
+    width: 32px;
+    height: 32px;
+  }
+
+  .character_tools_char_name {
+    font-size: 0.95em;
+  }
+
+  .character_tools_char_fields {
+    max-height: 60px;
+  }
+
+  /* Pipeline - horizontal layout works, just compress */
+  .character_tools_stage_row {
+    gap: var(--ct-spacing-xs);
+  }
+
+  .character_tools_stage_btn {
+    padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
+    font-size: 0.8em;
+  }
+
+  /* Keep stage labels in landscape - we have width */
+  .character_tools_stage_btn span {
+    display: inline;
+  }
+
+  .character_tools_stage_connector {
+    width: 16px;
+  }
+
+  /* Pipeline actions - horizontal row, not stacked */
+  .character_tools_pipeline_actions {
+    flex-direction: row;
+    flex-wrap: nowrap;
+  }
+
+  .character_tools_pipeline_actions .menu_button {
+    padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
+    font-size: 0.8em;
+  }
+
+  /* Stage config - side by side where possible */
+  .character_tools_config_header {
+    gap: var(--ct-spacing-sm);
+  }
+
+  .character_tools_preset_select {
+    min-width: 100px;
+    max-width: 180px;
+    font-size: 0.85em;
+  }
+
+  .character_tools_prompt_textarea {
+    min-height: 50px;
+    font-size: 0.85em;
+  }
+
+  .character_tools_schema_textarea {
+    min-height: 40px;
+  }
+
+  /* Results - compressed height */
+  .character_tools_results_body {
+    max-height: 120px;
+    padding: var(--ct-spacing-sm);
+    font-size: 0.85em;
+  }
+
+  .character_tools_results_toolbar,
+  .character_tools_results_footer {
+    padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
+  }
+
+  /* Footer actions - horizontal */
+  .character_tools_footer_actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .character_tools_footer_actions .menu_button {
+    font-size: 0.8em;
+  }
+
+  /* Iteration - minimal */
+  .character_tools_iteration_list {
+    max-height: 80px;
+  }
+
+  .character_tools_iteration_view_content {
+    max-height: 120px;
+  }
+
+  /* Settings modal - critical fixes */
+  .character_tools_settings_modal {
+    min-width: unset;
+    max-width: 90vw;
+    gap: var(--ct-spacing-md);
+  }
+
+  .character_tools_settings_header {
+    font-size: 1em;
+    padding-bottom: var(--ct-spacing-sm);
+  }
+
+  .character_tools_settings_section {
+    gap: var(--ct-spacing-xs);
+  }
+
+  .character_tools_settings_section_header {
+    font-size: 0.9em;
+  }
+
+  /* Settings grid - 3 columns max in landscape to prevent overflow */
+  .character_tools_settings_grid_5 {
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--ct-spacing-xs);
+  }
+
+  .character_tools_settings_field label {
+    font-size: 0.8em;
+  }
+
+  .character_tools_settings_field .text_pole {
+    font-size: 0.85em;
+    padding: var(--ct-spacing-xs);
+  }
+
+  .character_tools_system_prompt_textarea {
+    min-height: 60px;
+    font-size: 0.85em;
+  }
+
+  /* Presets grid - side by side */
+  .character_tools_presets_grid {
+    grid-template-columns: 1fr 1fr;
+    gap: var(--ct-spacing-sm);
+  }
+
+  .character_tools_preset_list {
+    max-height: 80px;
+  }
+
+  /* Shortcuts - inline */
+  .character_tools_shortcuts_list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--ct-spacing-md);
+  }
+
+  .character_tools_shortcut_item {
+    font-size: 0.8em;
+  }
+
+  /* Debug section */
+  .character_tools_debug_log_list,
+  .character_tools_debug_log_detail {
+    max-height: 60px;
+  }
+}
+
+/* ============================================================================
+   LANDSCAPE - VERY SHORT (max-height: 400px)
+   Extreme compression for very short viewports
+   ============================================================================ */
+
+@media (max-height: 400px) and (orientation: landscape) {
+  .character_tools_popup {
+    gap: var(--ct-spacing-xs);
+  }
+
+  .character_tools_popup_header {
+    padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
+  }
+
+  .character_tools_popup_title {
+    font-size: 0.9em;
+  }
+
+  .character_tools_popup_title i {
+    display: none;
+  }
+
+  .character_tools_section_header {
+    font-size: 0.8em;
+  }
+
+  .character_tools_section_header i {
+    display: none;
+  }
+
+  .character_tools_char_fields {
+    display: none;
+  }
+
+  .character_tools_stage_btn span {
+    display: none;
+  }
+
+  .character_tools_prompt_textarea {
+    min-height: 40px;
+  }
+
+  .character_tools_results_body {
+    max-height: 80px;
+  }
+
+  .character_tools_iteration_history {
+    display: none;
+  }
+
+  /* Settings - even more compact */
+  .character_tools_settings_grid_5 {
+    grid-template-columns: repeat(5, 1fr);
+    gap: 2px;
+  }
+
+  .character_tools_settings_field label {
+    font-size: 0.7em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .character_tools_settings_field .text_pole {
+    font-size: 0.8em;
+    padding: 2px 4px;
+    height: 28px;
+  }
+}
+
+/* ============================================================================
+   TABLET (601px - 768px)
+   ============================================================================ */
+
+@media (min-width: 601px) and (max-width: 768px) {
+  .character_tools_popup {
+    min-width: unset;
+    max-width: 100%;
+  }
+
+  .character_tools_settings_grid_5 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .character_tools_stage_btn span {
+    display: inline;
+  }
+
+  .character_tools_footer_actions {
+    flex-wrap: wrap;
+  }
+
+  .character_tools_footer_actions .menu_button {
+    flex: 1 1 auto;
+    min-width: 120px;
+  }
+}
+
+/* ============================================================================
+   REDUCED MOTION
+   ============================================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .character_tools_popup *,
+  .character_tools_settings_modal * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ============================================================================
+   HIGH CONTRAST MODE SUPPORT
+   ============================================================================ */
+
+@media (prefers-contrast: high) {
+  .character_tools_popup,
+  .character_tools_settings_modal {
+    --ct-radius-sm: 2px;
+    --ct-radius-md: 3px;
+    --ct-radius-lg: 4px;
+  }
+
+  .character_tools_badge,
+  .character_tools_verdict_badge,
+  .character_tools_iteration_indicator {
+    border: 1px solid currentColor;
+  }
+
+  .character_tools_stage_btn,
+  .character_tools_popup .menu_button,
+  .character_tools_settings_modal .menu_button {
+    border-width: 2px;
+  }
+
+  .character_tools_stage_btn.active,
+  .character_tools_continue_btn,
+  .character_tools_apply_btn,
+  .character_tools_refine_recommended,
+  .character_tools_accept_recommended {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+  }
 }
 ```
 

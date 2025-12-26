@@ -15,8 +15,8 @@ import type {
 // ============================================================================
 
 export const MODULE_NAME = 'character_tools';
-export const EXTENSION_PATH = 'third-party/my-extension';
-export const SETTINGS_VERSION = 3;  // Bump for refinement additions
+export const EXTENSION_PATH = 'third-party/SillyTavern-CharacterTools';
+export const SETTINGS_VERSION = 3;
 
 // ============================================================================
 // CHARACTER FIELDS
@@ -524,7 +524,31 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
 // TEMPLATE PLACEHOLDERS
 // ============================================================================
 
-// These placeholders can be used in prompts and will be replaced at runtime
+/**
+ * Template placeholders that can be used in prompts.
+ * These are replaced at runtime with actual values.
+ *
+ * @property ORIGINAL_CHARACTER - The full character card being analyzed/rewritten.
+ *           Includes all populated fields formatted as markdown sections.
+ *
+ * @property SCORE_RESULTS - Output from the Score stage. Available in Rewrite and Analyze stages.
+ *           Empty string if Score stage wasn't run.
+ *
+ * @property REWRITE_RESULTS - Output from the Rewrite stage. Available in Analyze stage.
+ *           Empty string if Rewrite stage wasn't run.
+ *
+ * @property CURRENT_REWRITE - Alias for REWRITE_RESULTS, used in refinement context.
+ *
+ * @property CURRENT_ANALYSIS - Output from the Analyze stage. Used in refinement prompts.
+ *           Empty string if Analyze stage wasn't run.
+ *
+ * @property ITERATION_NUMBER - Current refinement iteration number (1-based).
+ *           "1" for first iteration, increments with each refinement cycle.
+ *
+ * @property CHARACTER_NAME - The character's name (e.g., "Luna").
+ *
+ * @property USER_NAME - The user's configured name in SillyTavern.
+ */
 export const TEMPLATE_PLACEHOLDERS = {
     ORIGINAL_CHARACTER: '{{original_character}}',
     SCORE_RESULTS: '{{score_results}}',

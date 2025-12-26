@@ -28,7 +28,10 @@ import {
     completeRefinement,
     acceptRewrite,
     revertToIteration,
+    parseRewriteResponse,
+    applyRewriteToCharacter,
 } from '../pipeline';
+import { getPromptPreset, getSchemaPreset } from '../settings';
 import { runStageGeneration, runRefinementGeneration, getStageTokenCount, getRefinementTokenCount, getApiInfo, isApiReady } from '../generator';
 import { renderCharacterSelect, updateCharacterSelectState, renderDropdownItems, updateFieldTokenCounts } from './components/character-select';
 import { getPopulatedFields } from '../character';
@@ -46,6 +49,7 @@ import {
 import { renderResultsPanel, updateResultsPanelState, renderRefinementLoading } from './components/results-panel';
 import { renderIterationHistory, updateIterationHistoryState, renderIterationViewContent } from './components/iteration-history';
 import { openSettingsModal } from './settings-modal';
+import { saveIterationHistory, loadIterationHistory } from '../persistence';
 import type { PipelineState, StageName, Character, IterationSnapshot } from '../types';
 
 // ============================================================================
@@ -58,7 +62,9 @@ let popupState: {
     isRefining: boolean;
     abortController: AbortController | null;
     activeStageView: StageName;
-    characters: Character[];
+    historyLoaded: boolean;
+    // Store debounced functions for cleanup
+    debouncedFunctions: Array<{ cancel: () => void }>;
 } | null = null;
 
 let popupElement: HTMLElement | null = null;
@@ -78,12 +84,23 @@ function subscribeEvents(): void {
             updateApiStatus();
         },
 
-        onCharEdited: () => {
-            debugLog('info', 'Character edited externally', null);
-            refreshSelectedCharacter();
+        onMainApiChange: () => {
+            debugLog('info', 'Main API changed', null);
+            updateApiStatus();
+            updateTokenEstimate();
+        },
+
+        onCharEdited: (data: { detail?: { character: Character; id: string }; character?: Character; id?: number }) => {
+            // Handle both payload formats - CHARACTER_EDITED uses { detail: { character, id: string } }
+            const character = data.detail?.character ?? data.character;
+            const id = data.detail?.id !== undefined ? parseInt(data.detail.id, 10) : data.id;
+
+            debugLog('info', 'Character edited externally', { id, name: character?.name });
+            refreshSelectedCharacter(id as number);
         },
 
         onCharDeleted: (data: { id: number; character: Character }) => {
+            // CHARACTER_DELETED uses flat { id: number, character }
             debugLog('info', 'Character deleted', { id: data.id });
             handleCharacterDeleted(data.id);
         },
@@ -109,6 +126,7 @@ function subscribeEvents(): void {
     };
 
     eventSource.on(eventTypes.ONLINE_STATUS_CHANGED, handlers.onStatusChange);
+    eventSource.on(eventTypes.MAIN_API_CHANGED, handlers.onMainApiChange);
     eventSource.on(eventTypes.CHARACTER_EDITED, handlers.onCharEdited);
     eventSource.on(eventTypes.CHARACTER_DELETED, handlers.onCharDeleted);
     eventSource.on(eventTypes.OAI_PRESET_CHANGED_AFTER, handlers.onPresetChanged);
@@ -117,6 +135,7 @@ function subscribeEvents(): void {
 
     eventCleanup.push(
         () => eventSource.removeListener(eventTypes.ONLINE_STATUS_CHANGED, handlers.onStatusChange),
+        () => eventSource.removeListener(eventTypes.MAIN_API_CHANGED, handlers.onMainApiChange),
         () => eventSource.removeListener(eventTypes.CHARACTER_EDITED, handlers.onCharEdited),
         () => eventSource.removeListener(eventTypes.CHARACTER_DELETED, handlers.onCharDeleted),
         () => eventSource.removeListener(eventTypes.OAI_PRESET_CHANGED_AFTER, handlers.onPresetChanged),
@@ -154,14 +173,18 @@ function updateApiStatus(): void {
     updatePipelineNav();
 }
 
-function refreshSelectedCharacter(): void {
+function refreshSelectedCharacter(editedId?: number): void {
     if (!popupState || popupState.pipeline.characterIndex === null) return;
 
+    // Get fresh characters from context - don't use cached
     const { characters } = SillyTavern.getContext();
     const charList = characters as Character[];
     const index = popupState.pipeline.characterIndex;
 
-    popupState.characters = charList;
+    // If a specific character was edited and it's not ours, ignore
+    if (editedId !== undefined && editedId !== index) {
+        return;
+    }
 
     if (index >= 0 && index < charList.length) {
         const updatedChar = charList[index];
@@ -193,9 +216,11 @@ function handleCharacterDeleted(deletedId: number): void {
         handleCharacterInvalidated();
         toastr.warning('Selected character was deleted');
     } else if (currentIndex > deletedId) {
-        const newIndex = currentIndex - 1;
+        // Get fresh characters from context
         const { characters } = SillyTavern.getContext();
         const charList = characters as Character[];
+
+        const newIndex = currentIndex - 1;
 
         if (newIndex >= 0 && newIndex < charList.length) {
             popupState.pipeline = {
@@ -203,7 +228,6 @@ function handleCharacterDeleted(deletedId: number): void {
                 characterIndex: newIndex,
                 character: charList[newIndex],
             };
-            popupState.characters = charList;
             debugLog('info', 'Character index adjusted after deletion', { oldIndex: currentIndex, newIndex });
         } else {
             handleCharacterInvalidated();
@@ -217,6 +241,7 @@ function handleCharacterInvalidated(): void {
     debugLog('info', 'Character invalidated, clearing selection', null);
 
     popupState.pipeline = setCharacter(popupState.pipeline, null, null);
+    popupState.historyLoaded = false;
     updateAllComponents();
     toastr.info('Character selection cleared');
 }
@@ -258,6 +283,12 @@ function removeGlobalListeners(): void {
         document.removeEventListener('click', documentClickHandler);
         documentClickHandler = null;
     }
+
+    // Cancel any pending debounced operations
+    if (popupState?.debouncedFunctions) {
+        popupState.debouncedFunctions.forEach(fn => fn.cancel());
+        popupState.debouncedFunctions = [];
+    }
 }
 
 // ============================================================================
@@ -265,10 +296,8 @@ function removeGlobalListeners(): void {
 // ============================================================================
 
 export async function openMainPopup(): Promise<void> {
-    const { Popup, POPUP_TYPE, characters } = SillyTavern.getContext();
+    const { Popup, POPUP_TYPE } = SillyTavern.getContext();
     const { DOMPurify } = SillyTavern.libs;
-
-    const charList = characters as Character[];
 
     popupState = {
         pipeline: createPipelineState(),
@@ -276,7 +305,8 @@ export async function openMainPopup(): Promise<void> {
         isRefining: false,
         abortController: null,
         activeStageView: 'score',
-        characters: charList,
+        historyLoaded: false,
+        debouncedFunctions: [],
     };
 
     const content = buildPopupContent();
@@ -306,6 +336,11 @@ export async function openMainPopup(): Promise<void> {
 
     subscribeEvents();
     initGlobalListeners();
+
+    // Get fresh characters from context
+    const { characters } = SillyTavern.getContext();
+    const charList = characters as Character[];
+
     initComponents(charList);
     updateAllComponents();
 
@@ -393,7 +428,7 @@ function initComponents(characters: Character[]): void {
     const charContainer = popupElement.querySelector(`#${MODULE_NAME}_character_select_container`);
     if (charContainer) {
         charContainer.innerHTML = renderCharacterSelect(characters, popupState.pipeline.characterIndex);
-        initCharacterSelectListeners(characters);
+        initCharacterSelectListeners();
     }
 
     // Pipeline nav
@@ -437,7 +472,7 @@ function initComponents(characters: Character[]): void {
         historyContainer.innerHTML = renderIterationHistory(
             popupState.pipeline.iterationHistory,
             popupState.pipeline.iterationCount,
-            handleRevertToIteration,
+            popupState.historyLoaded,
         );
         initIterationHistoryListeners();
     }
@@ -445,6 +480,10 @@ function initComponents(characters: Character[]): void {
     // Header buttons
     popupElement.querySelector(`#${MODULE_NAME}_settings_btn`)?.addEventListener('click', () => {
         openSettingsModal(() => {
+            // After settings close, check if any deleted presets were in use
+            if (popupState) {
+                checkForDeletedPresetReferences();
+            }
             updateAllComponents();
         });
     });
@@ -458,12 +497,39 @@ function initComponents(characters: Character[]): void {
     });
 }
 
+/**
+ * Check if current pipeline configs reference deleted presets and clear them
+ */
+function checkForDeletedPresetReferences(): void {
+    if (!popupState) return;
+
+    for (const stage of STAGES) {
+        const config = popupState.pipeline.configs[stage];
+
+        // Check prompt preset
+        if (config.promptPresetId && !getPromptPreset(config.promptPresetId)) {
+            debugLog('info', 'Clearing deleted prompt preset reference', { stage, presetId: config.promptPresetId });
+            popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, stage, {
+                promptPresetId: null,
+            });
+        }
+
+        // Check schema preset
+        if (config.schemaPresetId && !getSchemaPreset(config.schemaPresetId)) {
+            debugLog('info', 'Clearing deleted schema preset reference', { stage, presetId: config.schemaPresetId });
+            popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, stage, {
+                schemaPresetId: null,
+            });
+        }
+    }
+}
+
 // ============================================================================
 // CHARACTER SELECT LISTENERS
 // ============================================================================
 
-function initCharacterSelectListeners(characters: Character[]): void {
-    if (!popupElement) return;
+function initCharacterSelectListeners(): void {
+    if (!popupElement || !popupState) return;
 
     const { Fuse, lodash } = SillyTavern.libs;
 
@@ -479,7 +545,10 @@ function initCharacterSelectListeners(characters: Character[]): void {
     let currentResults: Array<{ char: Character; index: number }> = [];
 
     const handleSearch = () => {
-        const currentChars = popupState?.characters || characters;
+        // Get fresh characters from context
+        const { characters } = SillyTavern.getContext();
+        const currentChars = characters as Character[];
+
         const currentCharData = currentChars
             .map((char, index) => ({ char, index }))
             .filter(({ char }) => char?.name);
@@ -514,6 +583,7 @@ function initCharacterSelectListeners(characters: Character[]): void {
     };
 
     const debouncedSearch = lodash.debounce(handleSearch, 150);
+    popupState.debouncedFunctions.push(debouncedSearch);
     searchInput.addEventListener('input', debouncedSearch);
 
     searchInput.addEventListener('keydown', (e) => {
@@ -564,6 +634,7 @@ function initCharacterSelectListeners(characters: Character[]): void {
         if (target.closest(`#${MODULE_NAME}_char_clear`)) {
             if (!popupState) return;
             popupState.pipeline = setCharacter(popupState.pipeline, null, null);
+            popupState.historyLoaded = false;
             updateAllComponents();
             return;
         }
@@ -583,12 +654,29 @@ function initCharacterSelectListeners(characters: Character[]): void {
     });
 }
 
-function selectCharacter(char: Character, index: number): void {
+async function selectCharacter(char: Character, index: number): Promise<void> {
     if (!popupState) return;
 
     popupState.pipeline = setCharacter(popupState.pipeline, char, index);
+    popupState.historyLoaded = false;
     updateAllComponents();
 
+    // Load iteration history for this character
+    const history = await loadIterationHistory(char);
+    if (popupState && popupState.pipeline.character === char) {
+        if (history && history.length > 0) {
+            popupState.pipeline = {
+                ...popupState.pipeline,
+                iterationHistory: history,
+                iterationCount: history.length,
+            };
+            debugLog('info', 'Loaded iteration history', { count: history.length });
+        }
+        popupState.historyLoaded = true;
+        updateIterationHistory();
+    }
+
+    // Update token counts
     setTimeout(async () => {
         if (!popupElement || !popupState?.pipeline.character) return;
 
@@ -623,7 +711,7 @@ function initPipelineNavListeners(): void {
         }
     });
 
-    container.addEventListener('click', (e) => {
+    container.addEventListener('click', async (e) => {
         const btn = (e.target as HTMLElement).closest(`.${MODULE_NAME}_stage_btn`);
         if (btn && popupState) {
             const stage = btn.getAttribute('data-stage') as StageName;
@@ -648,7 +736,17 @@ function initPipelineNavListeners(): void {
 
         const resetBtn = (e.target as HTMLElement).closest(`#${MODULE_NAME}_reset_pipeline_btn`);
         if (resetBtn && popupState) {
+            // Confirm before reset
+            const { Popup, POPUP_RESULT } = SillyTavern.getContext();
+            const confirmed = await Popup.show.confirm(
+                'Reset Pipeline?',
+                'This will clear all results and iteration history. Continue?',
+            );
+
+            if (confirmed !== POPUP_RESULT.AFFIRMATIVE) return;
+
             popupState.pipeline = resetPipeline(popupState.pipeline, true);
+            popupState.historyLoaded = true; // No history to load after reset
             updateAllComponents();
         }
     });
@@ -686,7 +784,8 @@ function initStageConfigListeners(): void {
     });
 
     const { lodash } = SillyTavern.libs;
-    container.addEventListener('input', lodash.debounce((e: Event) => {
+
+    const debouncedInputHandler = lodash.debounce((e: Event) => {
         const textarea = e.target as HTMLTextAreaElement;
 
         if (textarea.id === `${MODULE_NAME}_custom_prompt` && popupState) {
@@ -705,7 +804,10 @@ function initStageConfigListeners(): void {
             });
             updateStageConfigUI();
         }
-    }, 300));
+    }, 300);
+
+    popupState.debouncedFunctions.push(debouncedInputHandler);
+    container.addEventListener('input', debouncedInputHandler);
 
     container.addEventListener('change', (e) => {
         const checkbox = e.target as HTMLInputElement;
@@ -779,7 +881,7 @@ function initStageConfigListeners(): void {
         if (validateBtn && popupState) {
             const schemaTextarea = popupElement?.querySelector(`#${MODULE_NAME}_custom_schema`) as HTMLTextAreaElement;
             if (schemaTextarea) {
-                handleValidateSchema(schemaTextarea.value);
+                await handleValidateSchema(schemaTextarea.value);
             }
             return;
         }
@@ -830,7 +932,7 @@ function initResultsPanelListeners(): void {
     const container = popupElement.querySelector(`#${MODULE_NAME}_results_container`);
     if (!container) return;
 
-    container.addEventListener('click', (e) => {
+    container.addEventListener('click', async (e) => {
         const target = e.target as HTMLElement;
 
         // Regenerate
@@ -859,6 +961,11 @@ function initResultsPanelListeners(): void {
                 updateResultsPanel();
                 updateTokenEstimate();
             }
+        }
+
+        // Apply to Character
+        if (target.closest(`#${MODULE_NAME}_apply_btn`) && popupState) {
+            await handleApplyToCharacter();
         }
 
         // Refine
@@ -896,6 +1003,92 @@ function initResultsPanelListeners(): void {
             popupState.abortController.abort();
         }
     });
+}
+
+// ============================================================================
+// APPLY TO CHARACTER
+// ============================================================================
+
+async function handleApplyToCharacter(): Promise<void> {
+    if (!popupState || !popupState.pipeline.results.rewrite || !popupState.pipeline.character) {
+        toastr.warning('No rewrite to apply');
+        return;
+    }
+
+    const { Popup, POPUP_TYPE, POPUP_RESULT } = SillyTavern.getContext();
+    const { DOMPurify } = SillyTavern.libs;
+
+    const rewriteResponse = popupState.pipeline.results.rewrite.response;
+    const parsed = parseRewriteResponse(rewriteResponse);
+
+    // Build preview content
+    let previewHtml = `<div class="${MODULE_NAME}_apply_preview">`;
+    previewHtml += `<p><strong>Parse method:</strong> ${parsed.parseMethod}</p>`;
+
+    if (parsed.fields.length === 0) {
+        previewHtml += `<p class="${MODULE_NAME}_apply_warning">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            No recognized character fields found in the rewrite output.
+            The raw content will be copied to clipboard instead.
+        </p>`;
+        previewHtml += `<details><summary>Raw content preview</summary><pre>${DOMPurify.sanitize(parsed.raw.substring(0, 500))}...</pre></details>`;
+    } else {
+        previewHtml += `<p><strong>Fields to update (${parsed.fields.length}):</strong></p>`;
+        previewHtml += '<ul>';
+        for (const field of parsed.fields) {
+            const preview = field.value.substring(0, 100);
+            previewHtml += `<li><strong>${DOMPurify.sanitize(field.label)}:</strong> ${DOMPurify.sanitize(preview)}${field.value.length > 100 ? '...' : ''}</li>`;
+        }
+        previewHtml += '</ul>';
+    }
+    previewHtml += '</div>';
+
+    // Show confirmation
+    const confirmContent = `
+        <h3>Apply Rewrite to Character?</h3>
+        <p>This will update <strong>${DOMPurify.sanitize(popupState.pipeline.character.name)}</strong> with the rewritten content.</p>
+        ${previewHtml}
+    `;
+
+    const popup = new Popup(confirmContent, POPUP_TYPE.CONFIRM, '', {
+        wide: true,
+        okButton: parsed.fields.length > 0 ? 'Apply Changes' : 'Copy Raw Content',
+        cancelButton: 'Cancel',
+    });
+
+    const result = await popup.show();
+
+    if (result !== POPUP_RESULT.AFFIRMATIVE) {
+        return;
+    }
+
+    // If no fields parsed, just copy raw content
+    if (parsed.fields.length === 0) {
+        navigator.clipboard.writeText(parsed.raw);
+        toastr.info('Raw content copied to clipboard');
+        return;
+    }
+
+    // Apply the changes
+    const applyResult = await applyRewriteToCharacter(popupState.pipeline, parsed.fields);
+
+    if (applyResult.success) {
+        toastr.success(`Updated ${applyResult.updatedFields.length} fields: ${applyResult.updatedFields.join(', ')}`);
+
+        // Emit custom event for other extensions
+        const { eventSource } = SillyTavern.getContext();
+        await eventSource.emit('character_tools_rewrite_applied', {
+            characterName: popupState.pipeline.character.name,
+            characterIndex: popupState.pipeline.characterIndex,
+            updatedFields: applyResult.updatedFields,
+            iterationCount: popupState.pipeline.iterationCount,
+        });
+
+        // Refresh character data
+        refreshSelectedCharacter();
+    } else {
+        toastr.error(applyResult.error || 'Failed to apply changes');
+    }
 }
 
 // ============================================================================
@@ -945,6 +1138,12 @@ async function handleRevertToIteration(index: number): Promise<void> {
 
     popupState.pipeline = revertToIteration(popupState.pipeline, index);
     toastr.info(`Reverted to iteration #${index + 1}`);
+
+    // Save updated history
+    if (popupState.pipeline.character) {
+        await saveIterationHistory(popupState.pipeline.character, popupState.pipeline.iterationHistory);
+    }
+
     updateAllComponents();
 }
 
@@ -1097,6 +1296,12 @@ async function runRefinement(): Promise<void> {
         toastr.warning(validation.warnings.join('\n'));
     }
 
+    // Snapshot current state before starting refinement
+    const preRefinementState = {
+        iterationCount: popupState.pipeline.iterationCount,
+        iterationHistory: [...popupState.pipeline.iterationHistory],
+    };
+
     // Start refinement - this snapshots current state
     popupState.pipeline = startRefinement(popupState.pipeline);
     popupState.isRefining = true;
@@ -1127,14 +1332,33 @@ async function runRefinement(): Promise<void> {
 
             toastr.success(`Refinement #${popupState.pipeline.iterationCount} complete`);
 
+            // Save iteration history
+            if (popupState.pipeline.character) {
+                await saveIterationHistory(popupState.pipeline.character, popupState.pipeline.iterationHistory);
+            }
+
             // Switch to analyze view so user can review
             popupState.activeStageView = 'analyze';
         } else {
+            // Restore pre-refinement state on failure
+            popupState.pipeline = {
+                ...popupState.pipeline,
+                iterationCount: preRefinementState.iterationCount,
+                iterationHistory: preRefinementState.iterationHistory,
+            };
+
             if (result.error !== 'Generation cancelled') {
                 toastr.error(result.error);
             }
         }
     } catch (e) {
+        // Restore pre-refinement state on error
+        popupState.pipeline = {
+            ...popupState.pipeline,
+            iterationCount: preRefinementState.iterationCount,
+            iterationHistory: preRefinementState.iterationHistory,
+        };
+
         toastr.error((e as Error).message);
     } finally {
         popupState.isRefining = false;
@@ -1259,6 +1483,7 @@ function updateIterationHistory(): void {
             container as HTMLElement,
             popupState.pipeline.iterationHistory,
             popupState.pipeline.iterationCount,
+            popupState.historyLoaded,
         );
     }
 }

@@ -52,21 +52,21 @@ const UNSUPPORTED_REGEX_FEATURES = [
 // ============================================================================
 
 interface ValidationContext {
-  errors: string[];
-  warnings: string[];
-  info: string[];
-  stats: {
-    defCount: number;
-    anyOfCount: number;
-    totalAnyOfVariants: number;
-    maxDepth: number;
-    propertyCount: number;
-    optionalFieldCount: number;
-    enumCount: number;
-  };
-  currentDepth: number;
-  seenRefs: Set<string>;
-  defs: Record<string, JsonSchemaValue>;
+    errors: string[];
+    warnings: string[];
+    info: string[];
+    stats: {
+        defCount: number;
+        anyOfCount: number;
+        totalAnyOfVariants: number;
+        maxDepth: number;
+        propertyCount: number;
+        optionalFieldCount: number;
+        enumCount: number;
+    };
+    currentDepth: number;
+    seenRefs: Set<string>;
+    defs: Record<string, JsonSchemaValue>;
 }
 
 const SCHEMA_GENERATION_PROMPT = `Generate a JSON Schema for structured LLM output based on the user's description.
@@ -84,9 +84,9 @@ Requirements:
 User's description:`;
 
 export async function generateSchemaFromDescription(description: string): Promise<{
-  success: boolean;
-  schema?: string;
-  error?: string;
+    success: boolean;
+    schema?: string;
+    error?: string;
 }> {
     const { generateRaw } = SillyTavern.getContext();
 
@@ -493,7 +493,7 @@ function validateStringNode(node: JsonSchemaValue, path: string, ctx: Validation
     }
 }
 
-function validateNumericNode(node: JsonSchemaValue, path: string, ctx: ValidationContext): void {
+function validateNumericNode(_node: JsonSchemaValue, _path: string, _ctx: ValidationContext): void {
     // All numeric constraints are ignored, already warned above
     // Nothing additional to check
 }
@@ -507,7 +507,7 @@ function validateRef(ref: string, path: string, ctx: ValidationContext): void {
 
     // Check for circular refs
     if (ctx.seenRefs.has(ref)) {
-    // Not necessarily an error, but worth noting
+        // Not necessarily an error, but worth noting
         ctx.info.push(`${path}: Circular reference to '${ref}'`);
         return;
     }
@@ -770,22 +770,44 @@ export function formatSchema(schema: StructuredOutputSchema | null): string {
 /**
  * Attempts to parse a structured output response.
  * Returns the parsed object or null if parsing fails.
+ * Optionally validates against a schema and returns partial results with warnings.
  */
-export function parseStructuredResponse(response: string): unknown | null {
+export function parseStructuredResponse(
+    response: string,
+    schema?: StructuredOutputSchema,
+): { data: unknown; warnings: string[] } | null {
+    let parsed: unknown;
+
     try {
-        return JSON.parse(response);
+        parsed = JSON.parse(response);
     } catch {
-    // Try to extract JSON from markdown code blocks
+        // Try to extract JSON from markdown code blocks
         const codeBlockMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
         if (codeBlockMatch) {
             try {
-                return JSON.parse(codeBlockMatch[1].trim());
+                parsed = JSON.parse(codeBlockMatch[1].trim());
             } catch {
                 return null;
             }
+        } else {
+            return null;
         }
-        return null;
     }
+
+    const warnings: string[] = [];
+
+    // If schema provided, validate required fields
+    if (schema && schema.value.required && Array.isArray(schema.value.required)) {
+        const missing = schema.value.required.filter(
+            field => !(field in (parsed as Record<string, unknown>)),
+        );
+
+        if (missing.length > 0) {
+            warnings.push(`Missing required fields: ${missing.join(', ')}`);
+        }
+    }
+
+    return { data: parsed, warnings };
 }
 
 /**
@@ -837,9 +859,9 @@ export function countOptionalFields(schema: JsonSchemaValue): number {
  * Estimates schema complexity for UI feedback.
  */
 export function estimateSchemaComplexity(schema: StructuredOutputSchema): {
-  level: 'simple' | 'moderate' | 'complex' | 'extreme';
-  score: number;
-  factors: string[];
+    level: 'simple' | 'moderate' | 'complex' | 'extreme';
+    score: number;
+    factors: string[];
 } {
     const factors: string[] = [];
     let score = 0;

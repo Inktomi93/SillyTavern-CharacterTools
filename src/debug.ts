@@ -23,7 +23,7 @@ export function isDebugMode(): boolean {
     try {
         return getSettings().debugMode;
     } catch {
-    // Settings might not be initialized yet
+        // Settings might not be initialized yet
         return false;
     }
 }
@@ -45,24 +45,34 @@ export function debugLog(type: DebugLogType, label: string, data: unknown): void
         logEntries.pop();
     }
 
-    // Only console log if debug mode is on
+    // Errors always log to console regardless of debug mode
+    if (type === 'error') {
+        console.error(`[${MODULE_NAME}:ERROR]`, label, data);
+        return;
+    }
+
+    // Other types only log if debug mode is on
     if (isDebugMode()) {
         const prefix = `[${MODULE_NAME}:${type.toUpperCase()}]`;
         switch (type) {
-            case 'error':
-                console.error(prefix, label, data);
-                break;
             case 'request':
             case 'response':
                 console.debug(prefix, label, data);
                 break;
             case 'state':
-                console.log(prefix, label, data);
-                break;
+            case 'info':
             default:
                 console.log(prefix, label, data);
         }
     }
+}
+
+/**
+ * Log an error - always outputs to console and stores in debug log.
+ * Use this for errors that should never be silently swallowed.
+ */
+export function logError(label: string, data: unknown): void {
+    debugLog('error', label, data);
 }
 
 // ============================================================================

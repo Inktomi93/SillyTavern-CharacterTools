@@ -4,7 +4,7 @@
 
 import { MODULE_NAME, EXTENSION_PATH } from '../constants';
 import { getSettings, setDebugMode } from '../settings';
-import { debugLog } from '../debug';
+import { debugLog, logError } from '../debug';
 import { openMainPopup } from './popup';
 
 // ============================================================================
@@ -19,7 +19,7 @@ export async function initPanel(): Promise<void> {
 
     const container = document.getElementById('extensions_settings');
     if (!container) {
-        console.error(`[${MODULE_NAME}] Extensions container not found`);
+        logError('Extensions container not found', null);
         return;
     }
 
@@ -35,7 +35,7 @@ export async function initPanel(): Promise<void> {
 
         debugLog('info', 'Panel initialized', null);
     } catch (error) {
-        console.error(`[${MODULE_NAME}] Failed to load panel template:`, error);
+        logError('Failed to load panel template', error);
     }
 }
 

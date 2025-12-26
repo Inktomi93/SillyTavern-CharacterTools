@@ -15,6 +15,7 @@ FILES=(
   "src/debug.ts"
   "src/pipeline.ts"
   "src/presets.ts"
+  "src/persistence.ts"
   # UI files
   "src/ui/formatter.ts"
   "src/ui/panel.ts"

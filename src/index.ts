@@ -4,15 +4,20 @@
 
 import { getSettings } from './settings';
 import { initPanel } from './ui/panel';
-import { debugLog } from './debug';
+import { debugLog, logError } from './debug';
 
 function init(): void {
-    debugLog('info', 'Extension initializing', { version: '2.0.0' });
+    try {
+        debugLog('info', 'Extension initializing', { version: '1.0.0' });
 
-    initPanel();
-    registerEventListeners();
+        initPanel();
+        registerEventListeners();
 
-    debugLog('info', 'Extension loaded', getSettings());
+        debugLog('info', 'Extension loaded', getSettings());
+    } catch (error) {
+        logError('Extension initialization failed', error);
+        toastr.error('Character Tools failed to initialize. Check console for details.');
+    }
 }
 
 function registerEventListeners(): void {

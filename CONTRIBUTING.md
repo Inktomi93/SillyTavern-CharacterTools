@@ -37,10 +37,7 @@ Place `globals.d.ts` in your extension root for autocomplete support:
 // globals.d.ts
 export {};
 
-// Development: absolute path to your ST install
-import '/home/inktomi/SillyTavern/public/global';
-
-// Production paths (uncomment when publishing, comment out dev path above)
+// Production paths
 // import '../../../../public/global'; // user-scoped
 // import '../../../../global'; // server-scoped
 
@@ -91,7 +88,7 @@ declare global {
 
 ```json
 {
-  "display_name": "Character Rewriter",
+  "display_name": "Character Tools",
   "loading_order": 1,
   "requires": [],
   "optional": [],
@@ -100,7 +97,7 @@ declare global {
   "css": "style.css",
   "author": "Inktomi",
   "version": "1.0.0",
-  "homePage": "https://github.com/Inktomi93/Sillytavern-ExtensionTest",
+  "homePage": "https://github.com/Inktomi93/SillyTavern-CharacterTools",
   "auto_update": true,
   "minimum_client_version": "",
   "i18n": {}
@@ -1176,7 +1173,7 @@ globalThis.myInterceptorFunction = async function(chat, contextSize, abort, type
 
 ## Custom Macros
 
-Macros are placeholders like `Nate` that get replaced in prompts.
+Macros are placeholders like `{{user}}` that get replaced in prompts.
 
 ### Registration
 

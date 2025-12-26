@@ -126,7 +126,7 @@ If the analysis shows issues, refine iteratively:
 
 ## License
 
-MIT
+AGPL-3.0
 
 ## Support
 

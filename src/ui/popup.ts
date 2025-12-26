@@ -331,15 +331,19 @@ export async function openMainPopup(): Promise<void> {
     });
 
     popup.show().then(() => {
+    // Cleanup while state still exists
         if (popupState?.abortController) {
             popupState.abortController.abort();
         }
-        popupState = null;
-        popupElement = null;
-        characterSelectInitialized = false;
         unsubscribeEvents();
         removeGlobalListeners();
         clearTokenCache();
+
+        // Now safe to null
+        popupState = null;
+        popupElement = null;
+        characterSelectInitialized = false;
+
         debugLog('info', 'Popup closed', null);
     });
 

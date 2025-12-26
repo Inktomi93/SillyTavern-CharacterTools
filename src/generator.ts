@@ -444,14 +444,21 @@ async function consumeStreamGenerator(
     signal?: AbortSignal,
 ): Promise<string> {
     let finalText = '';
+    let generator: AsyncGenerator<unknown> | null = null;
 
     try {
-        const generator = generatorFn();
+        generator = generatorFn();
 
         for await (const chunk of generator) {
             // Check abort during streaming
             if (signal?.aborted) {
                 debugLog('info', 'Stream aborted', { textSoFar: finalText.length });
+                // Try to close the generator gracefully before throwing
+                try {
+                    await generator.return(undefined);
+                } catch {
+                    // Ignore errors during cleanup
+                }
                 throw new DOMException('Aborted', 'AbortError');
             }
 
@@ -475,6 +482,15 @@ async function consumeStreamGenerator(
             textSoFar: finalText.length,
         });
 
+        // Try to close the generator on error
+        if (generator) {
+            try {
+                await generator.return(undefined);
+            } catch {
+                // Ignore errors during cleanup
+            }
+        }
+
         // Return partial response if we have one
         if (finalText) {
             debugLog('info', 'Returning partial response after stream error', {
@@ -489,6 +505,7 @@ async function consumeStreamGenerator(
     debugLog('info', 'Stream consumed', { finalLength: finalText.length });
     return finalText;
 }
+
 
 // ============================================================================
 // TOKEN ESTIMATION

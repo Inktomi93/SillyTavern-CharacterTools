@@ -33,7 +33,7 @@ import {
 } from '../pipeline';
 import { getPromptPreset, getSchemaPreset } from '../settings';
 import { runStageGeneration, runRefinementGeneration, getStageTokenCount, getRefinementTokenCount, getApiInfo, isApiReady } from '../generator';
-import { renderCharacterSelect, updateCharacterSelectState, renderDropdownItems, updateFieldTokenCounts } from './components/character-select';
+import { renderCharacterSelect, updateCharacterSelectState, renderDropdownItems, updateFieldTokenCounts, clearTokenCache } from './components/character-select';
 import { getPopulatedFields } from '../character';
 import { renderPipelineNav, updatePipelineNavState } from './components/pipeline-nav';
 import {
@@ -250,7 +250,6 @@ function handleCharacterInvalidated(): void {
 // GLOBAL LISTENERS
 // ============================================================================
 
-let documentClickHandler: ((e: MouseEvent) => void) | null = null;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 
 function initGlobalListeners(): void {
@@ -279,10 +278,6 @@ function removeGlobalListeners(): void {
         document.removeEventListener('keydown', keyboardHandler);
         keyboardHandler = null;
     }
-    if (documentClickHandler) {
-        document.removeEventListener('click', documentClickHandler);
-        documentClickHandler = null;
-    }
 
     // Cancel any pending debounced operations
     if (popupState?.debouncedFunctions) {
@@ -290,6 +285,7 @@ function removeGlobalListeners(): void {
         popupState.debouncedFunctions = [];
     }
 }
+
 
 // ============================================================================
 // MAIN ENTRY
@@ -327,6 +323,7 @@ export async function openMainPopup(): Promise<void> {
         popupElement = null;
         unsubscribeEvents();
         removeGlobalListeners();
+        clearTokenCache();
         debugLog('info', 'Popup closed', null);
     });
 
@@ -608,12 +605,14 @@ function initCharacterSelectListeners(): void {
         }
     });
 
-    documentClickHandler = (e: MouseEvent) => {
+    // Document click handler - add to eventCleanup for proper removal
+    const handleDocumentClick = (e: MouseEvent) => {
         if (!searchInput.contains(e.target as Node) && !dropdown.contains(e.target as Node)) {
             dropdown.classList.add('hidden');
         }
     };
-    document.addEventListener('click', documentClickHandler);
+    document.addEventListener('click', handleDocumentClick);
+    eventCleanup.push(() => document.removeEventListener('click', handleDocumentClick));
 
     dropdown.addEventListener('click', (e) => {
         const item = (e.target as HTMLElement).closest(`.${MODULE_NAME}_dropdown_item`);
@@ -654,8 +653,12 @@ function initCharacterSelectListeners(): void {
     });
 }
 
+
 async function selectCharacter(char: Character, index: number): Promise<void> {
     if (!popupState) return;
+
+    // Capture the index we're selecting for race condition check
+    const selectedIndex = index;
 
     popupState.pipeline = setCharacter(popupState.pipeline, char, index);
     popupState.historyLoaded = false;
@@ -663,7 +666,9 @@ async function selectCharacter(char: Character, index: number): Promise<void> {
 
     // Load iteration history for this character
     const history = await loadIterationHistory(char);
-    if (popupState && popupState.pipeline.character === char) {
+
+    // Check if we're still on the same character by index (not reference)
+    if (popupState && popupState.pipeline.characterIndex === selectedIndex) {
         if (history && history.length > 0) {
             popupState.pipeline = {
                 ...popupState.pipeline,
@@ -676,9 +681,10 @@ async function selectCharacter(char: Character, index: number): Promise<void> {
         updateIterationHistory();
     }
 
-    // Update token counts
+    // Update token counts - also check we're still on same character
     setTimeout(async () => {
         if (!popupElement || !popupState?.pipeline.character) return;
+        if (popupState.pipeline.characterIndex !== selectedIndex) return;
 
         const container = popupElement.querySelector(`#${MODULE_NAME}_character_select_container`);
         if (container) {
@@ -689,6 +695,7 @@ async function selectCharacter(char: Character, index: number): Promise<void> {
 
     debugLog('info', 'Character selected', { name: char.name, index });
 }
+
 
 // ============================================================================
 // PIPELINE NAV LISTENERS

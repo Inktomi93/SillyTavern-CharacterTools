@@ -10,6 +10,7 @@ import type { Character, PopulatedField } from '../../types';
 // TOKEN CACHE
 // ============================================================================
 
+const MAX_TOKEN_CACHE_SIZE = 500;
 const tokenCache = new Map<string, number>();
 
 function getTokenCacheKey(content: string): string {
@@ -21,6 +22,24 @@ function getTokenCacheKey(content: string): string {
         hash = hash & hash;
     }
     return `${hash}_${content.length}`;
+}
+
+function addToTokenCache(key: string, value: number): void {
+    // Evict oldest entry if cache is full
+    if (tokenCache.size >= MAX_TOKEN_CACHE_SIZE) {
+        const firstKey = tokenCache.keys().next().value;
+        if (firstKey !== undefined) {
+            tokenCache.delete(firstKey);
+        }
+    }
+    tokenCache.set(key, value);
+}
+
+/**
+ * Clear the token cache. Call when popup closes to free memory.
+ */
+export function clearTokenCache(): void {
+    tokenCache.clear();
 }
 
 // ============================================================================
@@ -167,7 +186,7 @@ export async function updateFieldTokenCounts(container: HTMLElement, fields: Pop
 
         try {
             const tokens = await getTokenCountAsync(field.value);
-            tokenCache.set(cacheKey, tokens);
+            addToTokenCache(cacheKey, tokens);
             return { field, tokens };
         } catch {
             return { field, tokens: null };

@@ -1,4 +1,4 @@
-# ST-CharacterRewriter
+# SillyTavern-CharacterTools
 
 A SillyTavern extension for analyzing, scoring, and iteratively improving character cards using LLM-powered feedback.
 
@@ -16,14 +16,14 @@ A SillyTavern extension for analyzing, scoring, and iteratively improving charac
 ### From GitHub (Recommended)
 
 1. Open SillyTavern and go to **Extensions** > **Install Extension**
-2. Paste: `https://github.com/YourUsername/ST-CharacterRewriter`
+2. Paste: `https://github.com/Inktomi93/SillyTavern-CharacterTools`
 3. Click **Install**
 
 ### Manual Installation
 
 ```bash
 cd SillyTavern/data/<user>/extensions/third-party/
-git clone https://github.com/YourUsername/ST-CharacterRewriter
+git clone https://github.com/Inktomi93/SillyTavern-CharacterTools
 ```
 
 Restart SillyTavern after installation.
@@ -56,8 +56,8 @@ Access settings via the gear icon in the popup header.
 ## Building from Source
 
 ```bash
-git clone https://github.com/YourUsername/ST-CharacterRewriter
-cd ST-CharacterRewriter
+git clone https://github.com/Inktomi93/SillyTavern-CharacterTools
+cd SillyTavern-CharacterTools
 npm install
 npm run build
 ```

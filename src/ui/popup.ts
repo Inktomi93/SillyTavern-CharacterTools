@@ -654,6 +654,7 @@ function initCharacterSelectListeners(): void {
 }
 
 
+
 async function selectCharacter(char: Character, index: number): Promise<void> {
     if (!popupState) return;
 

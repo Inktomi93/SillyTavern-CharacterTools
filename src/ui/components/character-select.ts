@@ -11,10 +11,16 @@ import type { Character, PopulatedField } from '../../types';
 // ============================================================================
 
 const MAX_TOKEN_CACHE_SIZE = 500;
-const tokenCache = new Map<string, number>();
+let tokenCache: Map<string, number> | null = null;
+
+function getTokenCache(): Map<string, number> {
+    if (!tokenCache) {
+        tokenCache = new Map();
+    }
+    return tokenCache;
+}
 
 function getTokenCacheKey(content: string): string {
-    // Simple hash for cache key
     let hash = 0;
     for (let i = 0; i < content.length; i++) {
         const char = content.charCodeAt(i);
@@ -25,21 +31,21 @@ function getTokenCacheKey(content: string): string {
 }
 
 function addToTokenCache(key: string, value: number): void {
-    // Evict oldest entry if cache is full
-    if (tokenCache.size >= MAX_TOKEN_CACHE_SIZE) {
-        const firstKey = tokenCache.keys().next().value;
+    const cache = getTokenCache();
+    if (cache.size >= MAX_TOKEN_CACHE_SIZE) {
+        const firstKey = cache.keys().next().value;
         if (firstKey !== undefined) {
-            tokenCache.delete(firstKey);
+            cache.delete(firstKey);
         }
     }
-    tokenCache.set(key, value);
+    cache.set(key, value);
 }
 
 /**
  * Clear the token cache. Call when popup closes to free memory.
  */
 export function clearTokenCache(): void {
-    tokenCache.clear();
+    tokenCache?.clear();
 }
 
 // ============================================================================
@@ -174,14 +180,13 @@ export function updateCharacterSelectState(
  */
 export async function updateFieldTokenCounts(container: HTMLElement, fields: PopulatedField[]): Promise<void> {
     const { getTokenCountAsync } = SillyTavern.getContext();
+    const cache = getTokenCache();
 
-    // Build array of promises for parallel execution
     const tokenPromises = fields.map(async (field) => {
         const cacheKey = getTokenCacheKey(field.value);
 
-        // Check cache first
-        if (tokenCache.has(cacheKey)) {
-            return { field, tokens: tokenCache.get(cacheKey)! };
+        if (cache.has(cacheKey)) {
+            return { field, tokens: cache.get(cacheKey)! };
         }
 
         try {
@@ -193,10 +198,8 @@ export async function updateFieldTokenCounts(container: HTMLElement, fields: Pop
         }
     });
 
-    // Execute all in parallel
     const results = await Promise.all(tokenPromises);
 
-    // Update UI with results
     let totalTokens = 0;
 
     for (const { field, tokens } of results) {
@@ -211,7 +214,6 @@ export async function updateFieldTokenCounts(container: HTMLElement, fields: Pop
         }
     }
 
-    // Update total
     const totalSpan = container.querySelector(`#${MODULE_NAME}_total_tokens`);
     if (totalSpan) {
         totalSpan.textContent = `${totalTokens.toLocaleString()} tokens`;

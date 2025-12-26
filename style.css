@@ -1777,6 +1777,40 @@
 }
 
 /* ============================================================================
+   LOADING OVERLAY
+   ============================================================================ */
+
+.character_tools_loading_overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.character_tools_loading_content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ct-spacing-md);
+  padding: var(--ct-spacing-xl);
+  background: var(--SmartThemeBlurTintColor);
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: var(--ct-radius-lg);
+  color: var(--SmartThemeBodyColor);
+}
+
+.character_tools_loading_content p {
+  margin: 0;
+  font-size: 0.95em;
+}
+
+/* ============================================================================
    MOBILE - PORTRAIT (max-width: 600px)
    ============================================================================ */
 

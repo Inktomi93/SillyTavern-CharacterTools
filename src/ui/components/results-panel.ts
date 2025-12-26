@@ -104,10 +104,10 @@ function renderResult(stage: StageName, result: StageResult): string {
         <div class="${MODULE_NAME}_results_actions">
           <!-- Always render BOTH buttons, use hidden class based on locked state -->
           <button id="${MODULE_NAME}_lock_btn" class="${MODULE_NAME}_icon_btn ${result.locked ? 'hidden' : ''}" title="Lock result">
-            <i class="fa-solid fa-lock"></i>
+            <i class="fa-solid fa-lock-open"></i>  <!-- CHANGED: Show open lock when unlocked -->
           </button>
           <button id="${MODULE_NAME}_unlock_btn" class="${MODULE_NAME}_icon_btn ${result.locked ? '' : 'hidden'}" title="Unlock for editing">
-            <i class="fa-solid fa-lock-open"></i>
+            <i class="fa-solid fa-lock"></i>  <!-- CHANGED: Show closed lock when locked -->
           </button>
           <button id="${MODULE_NAME}_copy_btn" class="${MODULE_NAME}_icon_btn" title="Copy to clipboard">
             <i class="fa-solid fa-copy"></i>
@@ -278,4 +278,3 @@ function renderFooterActions(
 
     return `<div class="${MODULE_NAME}_footer_actions">${actions.join('')}</div>`;
 }
-

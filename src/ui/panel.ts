@@ -28,6 +28,7 @@ export async function initPanel(): Promise<void> {
 
         const wrapper = document.createElement('div');
         wrapper.id = `${MODULE_NAME}_wrapper`;
+        wrapper.className = 'extension_container';  // ADD THIS LINE
         wrapper.innerHTML = html;
         container.appendChild(wrapper);
 

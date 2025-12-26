@@ -29,54 +29,23 @@ This document is a comprehensive reference for developing SillyTavern extensions
 15. [Complete API Reference](#complete-api-reference)
 
 ---
-
-## Project Structure
-
-### Basic Extension Layout
-
-```
-my-extension/
-├── manifest.json          # Required: Extension metadata
-├── index.js               # Required: Entry point
-├── style.css              # Optional: Styles
-└── README.md              # Optional: Documentation
-```
-
-### TypeScript Extension Layout
-
-```
-my-extension/
-├── manifest.json
-├── src/
-│   ├── index.ts
-│   ├── types.ts
-│   ├── constants.ts
-│   └── style.css
-├── dist/
-│   └── index.js           # Compiled output
-├── globals.d.ts           # Type declarations
-├── tsconfig.json
-├── webpack.config.js      # If bundling
-└── package.json
-```
-
 ### TypeScript Declaration File
 
 Place `globals.d.ts` in your extension root for autocomplete support:
 
 ```typescript
+// globals.d.ts
 export {};
 
-// Import for user-scoped extensions (data/default-user/extensions/)
-import '../../../../public/global';
-// Import for server-scoped extensions (public/scripts/extensions/third-party/)
-import '../../../../global';
+// Development: absolute path to your ST install
+import '/home/inktomi/SillyTavern/public/global';
 
-// Development: absolute path to your ST install (comment out for production)
-import '/path/to/SillyTavern/public/global';
+// Production paths (uncomment when publishing, comment out dev path above)
+// import '../../../../public/global'; // user-scoped
+// import '../../../../global'; // server-scoped
 
+// Extend ST's types with what we need
 declare global {
-  // Extend ST's types with what you need
   interface PresetManager {
     apiId: string;
     getPresetList: (api?: string) => {
@@ -88,8 +57,28 @@ declare global {
     getSelectedPresetName: () => string;
     selectPreset: (value: string) => boolean;
     getAllPresets: () => unknown[];
-    getPresetSettings: (name: string) => unknown;
-    getCompletionPresetByName: (name: string) => unknown;
+  }
+
+  interface ChatCompletionResult {
+    content: string;
+    reasoning?: string;
+  }
+
+  interface ChatCompletionRequestOptions {
+    stream: boolean;
+    messages: Array<{ role: string; content: string }>;
+    max_tokens?: number;
+    temperature?: number;
+  }
+
+  interface ChatCompletionService {
+    sendRequest: (options: ChatCompletionRequestOptions) => Promise<ChatCompletionResult>;
+    processRequest: (
+      options: ChatCompletionRequestOptions,
+      presetOptions: { presetName?: string },
+      extractData: boolean,
+      signal: AbortSignal | null
+    ) => Promise<ChatCompletionResult>;
   }
 }
 ```
@@ -102,19 +91,19 @@ declare global {
 
 ```json
 {
-  "display_name": "My Extension",
+  "display_name": "Character Rewriter",
   "loading_order": 1,
   "requires": [],
   "optional": [],
   "dependencies": [],
   "js": "dist/index.js",
   "css": "style.css",
-  "author": "Your Name",
+  "author": "Inktomi",
   "version": "1.0.0",
-  "homePage": "https://github.com/your/extension",
+  "homePage": "https://github.com/Inktomi93/Sillytavern-ExtensionTest",
   "auto_update": true,
-  "minimum_client_version": "1.0.0",
-  "generate_interceptor": "myInterceptorFunction"
+  "minimum_client_version": "",
+  "i18n": {}
 }
 ```
 

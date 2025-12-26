@@ -359,8 +359,8 @@ export function completeStage(
 /**
  * Mark a stage as failed (resets to pending)
  */
-export function failStage(state: PipelineState, stage: StageName, _error: string): PipelineState {
-    debugLog('state', 'Stage failed', { stage, error: _error });
+export function failStage(state: PipelineState, stage: StageName, error: string): PipelineState {
+    debugLog('error', 'Stage failed', { stage, error });
 
     return {
         ...state,

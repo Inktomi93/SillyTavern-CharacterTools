@@ -16,8 +16,10 @@
     "globals": "^16.0.0",
     "html-loader": "^5.1.0",
     "style-loader": "^4.0.0",
+    "terser-webpack-plugin": "^5.3.16",
     "ts-loader": "^9.5.1",
     "typescript-eslint": "^8.29.0",
+    "webpack": "^5.104.1",
     "webpack-cli": "^5.1.4"
   }
 }

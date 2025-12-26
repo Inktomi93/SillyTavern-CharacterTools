@@ -42,3 +42,4 @@ coverage/
 # Local dev tools - don't leak personal workflow
 project_snapshot.txt
 snapshot.sh
+dist/*.map

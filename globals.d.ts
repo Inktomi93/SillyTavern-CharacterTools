@@ -1,12 +1,9 @@
 // globals.d.ts
 export {};
 
-// Try ST's types first (when installed in ST), fall back to local copy
-// @ts-ignore - One of these will resolve
+// Try ST's types first
 import '../../../../public/global';
-// @ts-ignore
 import '../../../../global';
-// @ts-ignore - Local fallback for standalone builds
 import './st-types';
 
 // ============================================================================

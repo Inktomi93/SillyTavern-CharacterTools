@@ -39,10 +39,10 @@ Restart SillyTavern after installation.
 
 ### Keyboard Shortcuts
 
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl+Enter` | Run current stage |
-| `Escape` | Cancel generation |
+| Shortcut      | Action            |
+|---------------|-------------------|
+| `Ctrl+Enter`  | Run current stage |
+| `Escape`      | Cancel generation |
 
 ## Configuration
 

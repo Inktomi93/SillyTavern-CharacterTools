@@ -160,7 +160,7 @@ declare global {
      */
     function convertVideoToAnimatedWebp(args: ConvertVideoArgs): Promise<Uint8Array>;
 
-    type ColorPickerEvent = Omit<JQuery.ChangeEvent<HTMLElement>, "detail"> & {
+    type ColorPickerEvent = Omit<JQuery.ChangeEvent<HTMLElement>, 'detail'> & {
         detail: {
             rgba: string;
         }

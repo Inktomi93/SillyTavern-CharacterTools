@@ -24,14 +24,20 @@ export const VERSION = '1.0.0';
 // ============================================================================
 
 export const CHARACTER_FIELDS: readonly CharacterField[] = Object.freeze([
+    // Core content fields (scoreable)
     { key: 'description', label: 'Description', scoreable: true },
     { key: 'personality', label: 'Personality', scoreable: true },
     { key: 'first_mes', label: 'First Message', scoreable: true },
     { key: 'scenario', label: 'Scenario', scoreable: true },
     { key: 'mes_example', label: 'Example Messages', scoreable: true },
-    { key: 'system_prompt', label: 'System Prompt', scoreable: true },
-    { key: 'post_history_instructions', label: 'Post-History Instructions', scoreable: false },
-    { key: 'creator_notes', label: 'Creator Notes', scoreable: false },
+    { key: 'system_prompt', label: 'System Prompt', scoreable: true, path: 'data.system_prompt' },
+    { key: 'alternate_greetings', label: 'Alternate Greetings', scoreable: true, path: 'data.alternate_greetings', type: 'array' },
+
+    // Meta/instruction fields (not scoreable - they're instructions, not character content)
+    { key: 'post_history_instructions', label: 'Post-History Instructions', scoreable: false, path: 'data.post_history_instructions' },
+    { key: 'depth_prompt', label: 'Depth Prompt', scoreable: false, path: 'data.extensions.depth_prompt', type: 'object' },
+    { key: 'creator_notes', label: 'Creator Notes', scoreable: false, path: 'data.creator_notes' },
+    { key: 'character_book', label: 'Character Lorebook', scoreable: false, path: 'data.character_book', type: 'object' },
 ]);
 
 // ============================================================================

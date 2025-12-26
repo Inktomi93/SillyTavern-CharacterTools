@@ -10,7 +10,6 @@ import type {
     StageConfig,
     PipelineState,
     Character,
-    PopulatedField,
     StructuredOutputSchema,
     IterationSnapshot,
     IterationVerdict,
@@ -21,6 +20,7 @@ import { STAGES, CHARACTER_FIELDS, MAX_ITERATION_HISTORY } from './constants';
 import { createStageConfigFromDefaults, resolvePrompt, resolveSchema, processPromptTemplate, promptHasPlaceholders } from './presets';
 import { getSettings } from './settings';
 import { debugLog, logError } from './debug';
+import { getPopulatedFields, buildCharacterSummary } from './character';
 
 // ============================================================================
 // PIPELINE STATE FACTORY
@@ -121,38 +121,6 @@ export function setCharacter(state: PipelineState, character: Character | null, 
     });
 
     return newState;
-}
-
-/**
- * Get populated fields from a character
- */
-export function getPopulatedFields(char: Character): PopulatedField[] {
-    return CHARACTER_FIELDS
-        .filter(field => {
-            const val = char[field.key];
-            return val && typeof val === 'string' && val.trim().length > 0;
-        })
-        .map(field => {
-            const value = (char[field.key] as string).trim();
-            return {
-                key: field.key,
-                label: field.label,
-                value,
-                charCount: value.length,
-                scoreable: field.scoreable,
-            };
-        });
-}
-
-/**
- * Build character summary for prompts
- */
-export function buildCharacterSummary(char: Character): string {
-    const fields = getPopulatedFields(char);
-
-    const sections = fields.map(f => `### ${f.label}\n${f.value}`);
-
-    return `# CHARACTER: ${char.name}\n\n${sections.join('\n\n')}`;
 }
 
 // ============================================================================

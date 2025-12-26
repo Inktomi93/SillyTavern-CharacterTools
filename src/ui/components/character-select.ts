@@ -3,7 +3,7 @@
 // Character search and preview component
 
 import { MODULE_NAME } from '../../constants';
-import { getPopulatedFields } from '../../pipeline';
+import { getPopulatedFields } from '../../character';
 import type { Character, PopulatedField } from '../../types';
 
 // ============================================================================

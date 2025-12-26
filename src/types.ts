@@ -12,7 +12,31 @@ export type StageStatus = 'pending' | 'running' | 'complete' | 'skipped';
 // CHARACTER
 // ============================================================================
 
+export interface DepthPrompt {
+    prompt: string;
+    depth: number;
+    role: string;
+}
+
+export interface CharacterBookEntry {
+    id: number;
+    keys: string[];
+    secondary_keys: string[];
+    comment: string;
+    content: string;
+    constant: boolean;
+    selective: boolean;
+    enabled: boolean;
+    position: string;
+}
+
+export interface CharacterBook {
+    name?: string;
+    entries: CharacterBookEntry[];
+}
+
 export interface Character {
+    // Core fields (top-level)
     name: string;
     avatar: string;
     description: string;
@@ -20,16 +44,49 @@ export interface Character {
     first_mes: string;
     mes_example: string;
     scenario: string;
+
+    // These may be top-level OR in data.*
     system_prompt?: string;
     post_history_instructions?: string;
     creator_notes?: string;
+    creatorcomment?: string;  // Legacy key for creator_notes
+
+    // Tags (top-level)
     tags?: string[];
+
+    // V2/V3 spec data object
+    data?: {
+        name?: string;
+        description?: string;
+        personality?: string;
+        first_mes?: string;
+        mes_example?: string;
+        scenario?: string;
+        system_prompt?: string;
+        post_history_instructions?: string;
+        creator_notes?: string;
+        alternate_greetings?: string[];
+        tags?: string[];
+        creator?: string;
+        character_version?: string;
+        extensions?: {
+            talkativeness?: string;
+            fav?: boolean;
+            world?: string;
+            depth_prompt?: DepthPrompt;
+            [key: string]: unknown;
+        };
+        character_book?: CharacterBook;
+        group_only_greetings?: string[];
+    };
 }
 
 export interface CharacterField {
-    key: keyof Character;
+    key: string;
     label: string;
     scoreable: boolean;
+    path?: string;  // For nested fields like 'data.system_prompt'
+    type?: 'string' | 'array' | 'object';  // Default is 'string'
 }
 
 export interface PopulatedField {

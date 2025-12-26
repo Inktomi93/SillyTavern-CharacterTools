@@ -279,7 +279,11 @@ function removeGlobalListeners(): void {
         keyboardHandler = null;
     }
 
-    // Cancel any pending debounced operations
+    // MEMORY LEAK FIX: Cancel all pending debounced operations on cleanup.
+    // Without this, debounced functions could:
+    // 1. Fire after the popup is closed (accessing stale popupState)
+    // 2. Accumulate if popup is opened/closed rapidly
+    // 3. Hold references to DOM elements that should be garbage collected
     if (popupState?.debouncedFunctions) {
         popupState.debouncedFunctions.forEach(fn => fn.cancel());
         popupState.debouncedFunctions = [];
@@ -593,6 +597,11 @@ function initCharacterSelectListeners(): void {
         dropdown.classList.remove('hidden');
     };
 
+    // MEMORY LEAK FIX: Store reference to debounced function for cleanup.
+    // lodash.debounce returns a function with a .cancel() method.
+    // We must call cancel() when the popup closes to prevent:
+    // 1. Delayed execution after popup is gone
+    // 2. References being held to closed popup's DOM/state
     const debouncedSearch = lodash.debounce(handleSearch, 150);
     popupState.debouncedFunctions.push(debouncedSearch);
     searchInput.addEventListener('input', debouncedSearch);
@@ -672,7 +681,10 @@ function initCharacterSelectListeners(): void {
 async function selectCharacter(char: Character, index: number): Promise<void> {
     if (!popupState) return;
 
-    // Capture the index we're selecting for race condition check
+    // RACE CONDITION FIX: Capture the index we're selecting, not the object reference.
+    // The char object reference can become stale if the character list refreshes during
+    // async operations (loadIterationHistory). By comparing indices instead of object
+    // references, we ensure we're still operating on the intended selection.
     const selectedIndex = index;
 
     popupState.pipeline = setCharacter(popupState.pipeline, char, index);
@@ -682,7 +694,12 @@ async function selectCharacter(char: Character, index: number): Promise<void> {
     // Load iteration history for this character
     const history = await loadIterationHistory(char);
 
-    // Check if we're still on the same character by index (not reference)
+    // RACE CONDITION GUARD: Check by index, not object reference.
+    // Between the await above and now, the user could have:
+    // 1. Selected a different character
+    // 2. Cleared the selection
+    // 3. The character list could have refreshed
+    // Comparing by index is stable across these scenarios.
     if (popupState && popupState.pipeline.characterIndex === selectedIndex) {
         if (history && history.length > 0) {
             popupState.pipeline = {
@@ -696,9 +713,12 @@ async function selectCharacter(char: Character, index: number): Promise<void> {
         updateIterationHistory();
     }
 
-    // Update token counts - also check we're still on same character
+    // Update token counts - also guard against stale selection
     setTimeout(async () => {
         if (!popupElement || !popupState?.pipeline.character) return;
+
+        // RACE CONDITION GUARD: Same check - ensure we're still on the same character
+        // before updating UI with token counts that could take time to calculate.
         if (popupState.pipeline.characterIndex !== selectedIndex) return;
 
         const container = popupElement.querySelector(`#${MODULE_NAME}_character_select_container`);
@@ -807,10 +827,28 @@ function initStageConfigListeners(): void {
 
     const { lodash } = SillyTavern.libs;
 
+    // NULL CHECK FIX: The debounced function can fire after a delay, during which
+    // popupState could become null (user closed popup). We must check popupState
+    // at execution time, not just at creation time.
+    //
+    // Why this matters:
+    // 1. User types in textarea
+    // 2. Debounce delays execution by 300ms
+    // 3. User closes popup at 200ms
+    // 4. At 300ms, handler fires with popupState = null
+    // 5. Without guard: crash. With guard: safe no-op.
     const debouncedInputHandler = lodash.debounce((e: Event) => {
+        // GUARD: Check popupState exists before any access.
+        // This is the critical null check - popupState can be nulled
+        // by popup close between debounce schedule and execution.
+        if (!popupState) {
+            debugLog('info', 'Debounced input handler fired after popup closed, ignoring', null);
+            return;
+        }
+
         const textarea = e.target as HTMLTextAreaElement;
 
-        if (textarea.id === `${MODULE_NAME}_custom_prompt` && popupState) {
+        if (textarea.id === `${MODULE_NAME}_custom_prompt`) {
             popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, popupState.activeStageView, {
                 customPrompt: textarea.value,
                 promptPresetId: null,
@@ -819,7 +857,7 @@ function initStageConfigListeners(): void {
             updateStageConfigUI();
         }
 
-        if (textarea.id === `${MODULE_NAME}_custom_schema` && popupState) {
+        if (textarea.id === `${MODULE_NAME}_custom_schema`) {
             popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, popupState.activeStageView, {
                 customSchema: textarea.value,
                 schemaPresetId: null,
@@ -828,6 +866,10 @@ function initStageConfigListeners(): void {
         }
     }, 300);
 
+    // MEMORY LEAK FIX: Track for cleanup on popup close.
+    // Combined with Fix 2 - ensures this debounced function is cancelled
+    // when popup closes, preventing the null access scenario entirely
+    // (belt and suspenders with the null check above).
     popupState.debouncedFunctions.push(debouncedInputHandler);
     container.addEventListener('input', debouncedInputHandler);
 

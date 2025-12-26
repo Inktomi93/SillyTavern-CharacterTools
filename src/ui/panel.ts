@@ -2,7 +2,7 @@
 //
 // Extension panel - minimal, just the launch button and settings access.
 
-import { MODULE_NAME, EXTENSION_PATH } from '../constants';
+import { MODULE_NAME, EXTENSION_PATH, VERSION } from '../constants';
 import { getSettings, setDebugMode } from '../settings';
 import { debugLog, logError } from '../debug';
 import { openMainPopup } from './popup';
@@ -24,7 +24,7 @@ export async function initPanel(): Promise<void> {
     }
 
     try {
-        const html = await renderExtensionTemplateAsync(EXTENSION_PATH, 'templates/panel', {}, true);
+        const html = await renderExtensionTemplateAsync(EXTENSION_PATH, 'templates/panel', { version: VERSION }, true);
 
         const wrapper = document.createElement('div');
         wrapper.id = `${MODULE_NAME}_wrapper`;

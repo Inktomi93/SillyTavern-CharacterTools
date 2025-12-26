@@ -1,7 +1,7 @@
 // src/pipeline.ts
 //
 // Pipeline state machine for managing the character analysis workflow.
-// Handles stage progression, state transitions, and result management.
+// Handles stage progression, state transitions, result management, and iteration.
 
 import type {
     StageName,
@@ -12,9 +12,12 @@ import type {
     Character,
     PopulatedField,
     StructuredOutputSchema,
+    IterationSnapshot,
+    IterationVerdict,
 } from './types';
-import { STAGES, CHARACTER_FIELDS } from './constants';
+import { STAGES, CHARACTER_FIELDS, MAX_ITERATION_HISTORY } from './constants';
 import { createStageConfigFromDefaults, resolvePrompt, resolveSchema, processPromptTemplate } from './presets';
+import { getSettings } from './settings';
 import { debugLog } from './debug';
 
 // ============================================================================
@@ -48,6 +51,11 @@ export function createPipelineState(): PipelineState {
             rewrite: 'pending',
             analyze: 'pending',
         },
+
+        // Iteration system
+        iterationCount: 0,
+        iterationHistory: [],
+        isRefining: false,
 
         exportData: null,
     };
@@ -97,6 +105,10 @@ export function setCharacter(state: PipelineState, character: Character | null, 
             analyze: 'pending',
         },
         currentStage: null,
+        // Reset iteration state
+        iterationCount: 0,
+        iterationHistory: [],
+        isRefining: false,
         exportData: null,
     };
 
@@ -228,6 +240,25 @@ export function canRunStage(state: PipelineState, stage: StageName): { canRun: b
     }
 }
 
+/**
+ * Check if refinement can be run
+ */
+export function canRefine(state: PipelineState): { canRun: boolean; reason?: string } {
+    if (!state.character) {
+        return { canRun: false, reason: 'No character selected' };
+    }
+
+    if (!state.results.rewrite) {
+        return { canRun: false, reason: 'No rewrite to refine' };
+    }
+
+    if (!state.results.analyze) {
+        return { canRun: false, reason: 'Run analyze first to identify issues' };
+    }
+
+    return { canRun: true };
+}
+
 // ============================================================================
 // STAGE CONFIG MANAGEMENT
 // ============================================================================
@@ -305,6 +336,9 @@ export function completeStage(
         isStructured: result.isStructured,
     });
 
+    // If this is analyze completing, we're now in refinement mode
+    const isRefining = stage === 'analyze' && state.results.rewrite !== null;
+
     return {
         ...state,
         currentStage: null,
@@ -316,6 +350,7 @@ export function completeStage(
             ...state.results,
             [stage]: stageResult,
         },
+        isRefining,
     };
 }
 
@@ -412,6 +447,210 @@ export function clearStageResult(state: PipelineState, stage: StageName): Pipeli
 }
 
 // ============================================================================
+// ITERATION SYSTEM
+// ============================================================================
+
+/**
+ * Extract verdict from analysis response
+ */
+export function extractVerdict(analysisResponse: string): IterationVerdict {
+    const upper = analysisResponse.toUpperCase();
+
+    // Check for explicit verdict markers
+    if (upper.includes('VERDICT') || upper.includes('"VERDICT"')) {
+        if (upper.includes('ACCEPT') && !upper.includes('NEEDS')) {
+            return 'accept';
+        }
+        if (upper.includes('REGRESSION')) {
+            return 'regression';
+        }
+        if (upper.includes('NEEDS_REFINEMENT') || upper.includes('NEEDS REFINEMENT')) {
+            return 'needs_refinement';
+        }
+    }
+
+    // Fallback heuristics
+    if (upper.includes('READY TO USE') || upper.includes('NO MORE ITERATIONS')) {
+        return 'accept';
+    }
+    if (upper.includes('WORSE THAN') || upper.includes('STEP BACKWARD') || upper.includes('LOST MORE')) {
+        return 'regression';
+    }
+
+    // Default to needs refinement if we have any issues mentioned
+    if (upper.includes('ISSUE') || upper.includes('PROBLEM') || upper.includes('SHOULD FIX')) {
+        return 'needs_refinement';
+    }
+
+    return 'needs_refinement';
+}
+
+/**
+ * Create a snapshot of the current iteration before refining
+ */
+export function createIterationSnapshot(state: PipelineState): IterationSnapshot | null {
+    if (!state.results.rewrite || !state.results.analyze) {
+        return null;
+    }
+
+    const verdict = extractVerdict(state.results.analyze.response);
+
+    return {
+        iteration: state.iterationCount,
+        rewriteResponse: state.results.rewrite.response,
+        rewritePreview: state.results.rewrite.response.substring(0, 200),
+        analysisResponse: state.results.analyze.response,
+        analysisPreview: state.results.analyze.response.substring(0, 200),
+        verdict,
+        timestamp: Date.now(),
+    };
+}
+
+/**
+ * Start a refinement iteration
+ * - Snapshots current state
+ * - Clears analyze result
+ * - Increments iteration count
+ */
+export function startRefinement(state: PipelineState): PipelineState {
+    const snapshot = createIterationSnapshot(state);
+
+    if (!snapshot) {
+        debugLog('error', 'Cannot start refinement - missing rewrite or analyze', null);
+        return state;
+    }
+
+    // Add snapshot to history, trim if needed
+    const newHistory = [...state.iterationHistory, snapshot];
+    if (newHistory.length > MAX_ITERATION_HISTORY) {
+        newHistory.shift();
+    }
+
+    debugLog('state', 'Starting refinement iteration', {
+        iteration: state.iterationCount + 1,
+        previousVerdict: snapshot.verdict,
+    });
+
+    return {
+        ...state,
+        iterationHistory: newHistory,
+        iterationCount: state.iterationCount + 1,
+        // Clear analyze so user must re-analyze after refinement
+        results: {
+            ...state.results,
+            analyze: null,
+        },
+        stageStatus: {
+            ...state.stageStatus,
+            analyze: 'pending',
+        },
+        isRefining: true,
+    };
+}
+
+/**
+ * Complete a refinement (new rewrite generated)
+ * The refinement result replaces the current rewrite
+ */
+export function completeRefinement(
+    state: PipelineState,
+    refinedRewrite: Omit<StageResult, 'timestamp' | 'locked'>,
+): PipelineState {
+    const stageResult: StageResult = {
+        ...refinedRewrite,
+        timestamp: Date.now(),
+        locked: false,
+    };
+
+    debugLog('state', 'Refinement completed', {
+        iteration: state.iterationCount,
+        responseLength: refinedRewrite.response.length,
+    });
+
+    return {
+        ...state,
+        currentStage: null,
+        results: {
+            ...state.results,
+            rewrite: stageResult,
+            // analyze stays null - user must run it
+        },
+        stageStatus: {
+            ...state.stageStatus,
+            rewrite: 'complete',
+            analyze: 'pending',
+        },
+    };
+}
+
+/**
+ * Revert to a previous iteration
+ */
+export function revertToIteration(state: PipelineState, iterationIndex: number): PipelineState {
+    if (iterationIndex < 0 || iterationIndex >= state.iterationHistory.length) {
+        debugLog('error', 'Invalid iteration index', { iterationIndex, historyLength: state.iterationHistory.length });
+        return state;
+    }
+
+    const snapshot = state.iterationHistory[iterationIndex];
+
+    debugLog('state', 'Reverting to iteration', { iteration: snapshot.iteration });
+
+    // Restore the rewrite from that iteration
+    const restoredRewrite: StageResult = {
+        response: snapshot.rewriteResponse,
+        isStructured: false,
+        promptUsed: '[Restored from iteration history]',
+        schemaUsed: null,
+        timestamp: Date.now(),
+        locked: false,
+    };
+
+    // Trim history to that point
+    const trimmedHistory = state.iterationHistory.slice(0, iterationIndex);
+
+    return {
+        ...state,
+        results: {
+            ...state.results,
+            rewrite: restoredRewrite,
+            analyze: null,
+        },
+        stageStatus: {
+            ...state.stageStatus,
+            rewrite: 'complete',
+            analyze: 'pending',
+        },
+        iterationCount: snapshot.iteration,
+        iterationHistory: trimmedHistory,
+        isRefining: true,
+    };
+}
+
+/**
+ * Accept current rewrite as final (exit refinement loop)
+ */
+export function acceptRewrite(state: PipelineState): PipelineState {
+    if (!state.results.rewrite) {
+        return state;
+    }
+
+    debugLog('state', 'Rewrite accepted as final', { iteration: state.iterationCount });
+
+    return {
+        ...state,
+        results: {
+            ...state.results,
+            rewrite: {
+                ...state.results.rewrite,
+                locked: true,
+            },
+        },
+        isRefining: false,
+    };
+}
+
+// ============================================================================
 // PIPELINE NAVIGATION
 // ============================================================================
 
@@ -474,14 +713,6 @@ export function canExport(state: PipelineState): boolean {
 
 /**
  * Build the complete prompt for a stage, including template substitution.
- *
- * Data flow:
- * - Score: Gets character data only
- * - Rewrite: Gets character + score results (if available)
- * - Analyze: Gets original character + rewrite results + score results (if available)
- *
- * If the prompt uses {{placeholders}}, they get substituted.
- * If not, data is automatically prepended in a structured format.
  */
 export function buildStagePrompt(state: PipelineState, stage: StageName): string | null {
     if (!state.character) {
@@ -505,6 +736,9 @@ export function buildStagePrompt(state: PipelineState, stage: StageName): string
         originalCharacter: characterSummary,
         scoreResults: state.results.score?.response || '',
         rewriteResults: state.results.rewrite?.response || '',
+        currentRewrite: state.results.rewrite?.response || '',
+        currentAnalysis: state.results.analyze?.response || '',
+        iterationNumber: String(state.iterationCount + 1),
         charName: state.character.name,
         userName: name1 || 'User',
     };
@@ -531,6 +765,34 @@ export function buildStagePrompt(state: PipelineState, stage: StageName): string
         usesScorePlaceholder,
         usesRewritePlaceholder,
     });
+}
+
+/**
+ * Build the refinement prompt
+ */
+export function buildRefinementPrompt(state: PipelineState): string | null {
+    if (!state.character || !state.results.rewrite || !state.results.analyze) {
+        return null;
+    }
+
+    const settings = getSettings();
+    const basePrompt = settings.refinementPrompt;
+
+    const characterSummary = buildCharacterSummary(state.character);
+    const { name1 } = SillyTavern.getContext();
+
+    const context = {
+        originalCharacter: characterSummary,
+        scoreResults: state.results.score?.response || '',
+        rewriteResults: state.results.rewrite.response,
+        currentRewrite: state.results.rewrite.response,
+        currentAnalysis: state.results.analyze.response,
+        iterationNumber: String(state.iterationCount + 1),
+        charName: state.character.name,
+        userName: name1 || 'User',
+    };
+
+    return processPromptTemplate(basePrompt, context);
 }
 
 /**
@@ -638,14 +900,11 @@ export function generateExportData(state: PipelineState): string | null {
 
     const rewriteResponse = state.results.rewrite.response;
 
-    // Try to extract character card format from response
-    // The rewrite prompt asks for complete character card output
-    // We'll wrap it nicely for copying
-
     const exportLines = [
         `# ${state.character.name} (Rewritten)`,
         '',
         `Generated: ${new Date().toLocaleString()}`,
+        `Iterations: ${state.iterationCount}`,
         '',
         '---',
         '',
@@ -658,7 +917,7 @@ export function generateExportData(state: PipelineState): string | null {
             '',
             '---',
             '',
-            '## Analysis Notes',
+            '## Final Analysis',
             '',
             state.results.analyze.response,
         );
@@ -674,6 +933,25 @@ export function generateExportData(state: PipelineState): string | null {
             '',
             state.results.score.response,
         );
+    }
+
+    // Include iteration history summary if we have any
+    if (state.iterationHistory.length > 0) {
+        exportLines.push(
+            '',
+            '---',
+            '',
+            '## Iteration History',
+            '',
+        );
+
+        for (const snap of state.iterationHistory) {
+            exportLines.push(
+                `### Iteration ${snap.iteration + 1} - ${snap.verdict.toUpperCase()}`,
+                `${new Date(snap.timestamp).toLocaleString()}`,
+                '',
+            );
+        }
     }
 
     return exportLines.join('\n');
@@ -708,9 +986,16 @@ export function getPipelineSummary(state: PipelineState): {
   currentStage: StageName | null;
   canExport: boolean;
   isComplete: boolean;
+  iterationCount: number;
+  isRefining: boolean;
+  lastVerdict: IterationVerdict | null;
 } {
     const completedStages = STAGES.filter(s => state.stageStatus[s] === 'complete');
     const lockedStages = STAGES.filter(s => state.results[s]?.locked);
+
+    const lastSnapshot = state.iterationHistory.length > 0
+        ? state.iterationHistory[state.iterationHistory.length - 1]
+        : null;
 
     return {
         hasCharacter: !!state.character,
@@ -722,6 +1007,9 @@ export function getPipelineSummary(state: PipelineState): {
         currentStage: state.currentStage,
         canExport: canExport(state),
         isComplete: isPipelineComplete(state),
+        iterationCount: state.iterationCount,
+        isRefining: state.isRefining,
+        lastVerdict: lastSnapshot?.verdict || null,
     };
 }
 
@@ -805,6 +1093,51 @@ export function validatePipeline(state: PipelineState): PipelineValidation {
     };
 }
 
+/**
+ * Validate refinement before running
+ */
+export function validateRefinement(state: PipelineState): PipelineValidation {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    if (!state.character) {
+        errors.push('No character selected');
+    }
+
+    if (!state.results.rewrite) {
+        errors.push('No rewrite to refine');
+    }
+
+    if (!state.results.analyze) {
+        errors.push('Run analyze first to identify issues');
+    }
+
+    // Check API readiness
+    const { onlineStatus } = SillyTavern.getContext();
+    if (onlineStatus !== 'Valid' && onlineStatus !== 'Connected') {
+        errors.push('API is not connected');
+    }
+
+    // Warn if last verdict was accept
+    const lastSnapshot = state.iterationHistory.length > 0
+        ? state.iterationHistory[state.iterationHistory.length - 1]
+        : null;
+
+    if (lastSnapshot?.verdict === 'accept') {
+        warnings.push('Last analysis suggested accepting the rewrite');
+    }
+
+    if (state.iterationCount >= 5) {
+        warnings.push(`Already at iteration ${state.iterationCount + 1} - consider accepting or starting fresh`);
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        warnings,
+    };
+}
+
 // ============================================================================
 // SERIALIZATION (for potential future persistence)
 // ============================================================================
@@ -819,8 +1152,11 @@ export function serializePipelineState(state: PipelineState): Record<string, unk
         configs: state.configs,
         selectedStages: state.selectedStages,
         stageStatus: state.stageStatus,
+        iterationCount: state.iterationCount,
+        iterationHistory: state.iterationHistory,
+        isRefining: state.isRefining,
         exportData: state.exportData,
-    // Don't serialize character - will be re-fetched by index
+        // Don't serialize character - will be re-fetched by index
     };
 }
 
@@ -843,6 +1179,9 @@ export function deserializePipelineState(
             selectedStages: data.selectedStages as StageName[],
             currentStage: null,  // Always reset to null on restore
             stageStatus: data.stageStatus as Record<StageName, StageStatus>,
+            iterationCount: (data.iterationCount as number) || 0,
+            iterationHistory: (data.iterationHistory as IterationSnapshot[]) || [],
+            isRefining: (data.isRefining as boolean) || false,
             exportData: data.exportData as string | null,
         };
     } catch (e) {

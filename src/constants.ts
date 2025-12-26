@@ -16,7 +16,7 @@ import type {
 
 export const MODULE_NAME = 'character_tools';
 export const EXTENSION_PATH = 'third-party/my-extension';
-export const SETTINGS_VERSION = 2;  // Bump when settings structure changes
+export const SETTINGS_VERSION = 3;  // Bump for refinement additions
 
 // ============================================================================
 // CHARACTER FIELDS
@@ -67,10 +67,46 @@ Adapt your response style to the task:
 - For scoring: Be critical but fair, rate 1-10 with specific justifications
 - For rewrites: Preserve the character's core identity while improving weak areas
 - For analysis: Compare versions objectively, identify what was lost or gained
+- For refinement: Address specific issues from analysis while keeping improvements
 
 Focus on: writing quality, character depth, consistency, roleplay usability, and potential issues (contradictions, clichés, underdeveloped areas).
 
 Always maintain the character's essential personality and unique traits. Improvements should enhance, not replace, what makes the character interesting.`;
+
+// ============================================================================
+// DEFAULT REFINEMENT PROMPT
+// ============================================================================
+
+export const DEFAULT_REFINEMENT_PROMPT = `You are refining a character card rewrite based on analysis feedback.
+
+## Original Character (Ground Truth)
+{{original_character}}
+
+## Current Rewrite (Iteration {{iteration_number}})
+{{current_rewrite}}
+
+## Analysis of Current Rewrite
+{{current_analysis}}
+
+{{#if score_results}}
+## Original Score Feedback (Reference)
+{{score_results}}
+{{/if}}
+
+---
+
+## Your Task
+
+Create an improved version that:
+
+1. **Addresses Issues**: Fix the specific problems identified in the analysis
+2. **Preserves Wins**: Keep what the analysis said was working well
+3. **Maintains Soul**: The character must still feel like the original, just better
+4. **Avoids Regression**: Don't reintroduce problems that were already fixed
+
+Output the complete refined character card with all fields. Mark significantly changed sections with [REFINED] at the start.
+
+Do NOT explain your changes - just output the improved character card.`;
 
 // ============================================================================
 // BUILTIN PROMPT PRESETS
@@ -202,8 +238,11 @@ Don't change the core concept, but make it shine. Output the complete expanded c
 ## Soul Check
 Does the rewritten version still feel like the same character? Rate the "soul preservation" from 1-10 and explain.
 
-## Recommendations
-If anything important was lost, suggest how to restore it while keeping the improvements.
+## Verdict
+State clearly: **ACCEPT** (ready to use), **NEEDS REFINEMENT** (good progress but has issues), or **REGRESSION** (worse than before).
+
+## Specific Issues to Address
+If verdict is NEEDS REFINEMENT, list the specific problems that should be fixed in the next iteration.
 
 ---
 
@@ -217,6 +256,54 @@ If anything important was lost, suggest how to restore it while keeping the impr
 {{score_results}}`,
     },
     {
+        id: 'builtin_analyze_iteration',
+        name: 'Iteration Analyze',
+        stages: ['analyze'],
+        isBuiltin: true,
+        createdAt: 0,
+        updatedAt: 0,
+        prompt: `This is iteration {{iteration_number}} of refinement. Compare the current rewrite against the original.
+
+## Progress Check
+- What issues from previous analysis were addressed?
+- What new issues (if any) were introduced?
+- Is this version better, worse, or lateral move from the last?
+
+## Current State Assessment
+
+### Preserved from Original
+Core traits and elements that remain intact.
+
+### Still Missing or Lost
+Things from the original that should be restored.
+
+### Successfully Improved
+What's genuinely better now.
+
+### New Problems
+Any issues introduced by this iteration.
+
+## Soul Preservation Score
+Rate 1-10: Does this still feel like the original character?
+
+## Verdict
+**ACCEPT** - Ready to use, no more iterations needed
+**NEEDS REFINEMENT** - Making progress, but specific issues remain
+**REGRESSION** - This iteration made things worse, consider reverting
+
+## Next Steps
+If NEEDS REFINEMENT: List exactly what the next iteration should fix.
+If REGRESSION: Explain what went wrong and what to preserve from previous version.
+
+---
+
+### Original Character:
+{{original_character}}
+
+### Current Rewrite (Iteration {{iteration_number}}):
+{{rewrite_results}}`,
+    },
+    {
         id: 'builtin_analyze_quick',
         name: 'Quick Analyze',
         stages: ['analyze'],
@@ -228,7 +315,7 @@ If anything important was lost, suggest how to restore it while keeping the impr
 1. Soul preserved? (Yes/Partially/No)
 2. Best improvement made
 3. Biggest thing lost (if any)
-4. Keep this version? (Yes/No/Needs tweaks)
+4. Verdict: ACCEPT / NEEDS REFINEMENT / REGRESSION
 
 {{original_character}}
 
@@ -328,16 +415,20 @@ const ANALYZE_SCHEMA: StructuredOutputSchema = {
             },
             soulPreservationScore: { type: 'number' },
             soulAssessment: { type: 'string' },
+            verdict: {
+                type: 'string',
+                enum: ['ACCEPT', 'NEEDS_REFINEMENT', 'REGRESSION'],
+            },
+            issuesToAddress: {
+                type: 'array',
+                items: { type: 'string' },
+            },
             recommendations: {
                 type: 'array',
                 items: { type: 'string' },
             },
-            keepVersion: {
-                type: 'string',
-                enum: ['yes', 'no', 'needs_tweaks'],
-            },
         },
-        required: ['preserved', 'lost', 'gained', 'soulPreservationScore', 'soulAssessment', 'recommendations', 'keepVersion'],
+        required: ['preserved', 'lost', 'gained', 'soulPreservationScore', 'soulAssessment', 'verdict', 'issuesToAddress', 'recommendations'],
     },
 };
 
@@ -424,6 +515,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
     promptPresets: [...BUILTIN_PROMPT_PRESETS],
     schemaPresets: [...BUILTIN_SCHEMA_PRESETS],
     stageDefaults: DEFAULT_STAGE_DEFAULTS,
+    refinementPrompt: DEFAULT_REFINEMENT_PROMPT,
     debugMode: false,
     settingsVersion: SETTINGS_VERSION,
 });
@@ -437,6 +529,9 @@ export const TEMPLATE_PLACEHOLDERS = {
     ORIGINAL_CHARACTER: '{{original_character}}',
     SCORE_RESULTS: '{{score_results}}',
     REWRITE_RESULTS: '{{rewrite_results}}',
+    CURRENT_REWRITE: '{{current_rewrite}}',
+    CURRENT_ANALYSIS: '{{current_analysis}}',
+    ITERATION_NUMBER: '{{iteration_number}}',
     CHARACTER_NAME: '{{char_name}}',
     USER_NAME: '{{user_name}}',
 } as const;
@@ -457,6 +552,7 @@ export const DEBOUNCE_DELAY = {
 
 export const MAX_DROPDOWN_RESULTS = 10;
 export const MAX_DEBUG_LOG_ENTRIES = 100;
+export const MAX_ITERATION_HISTORY = 20;  // Don't keep more than this many snapshots
 
 // ============================================================================
 // CSS CLASS PREFIX

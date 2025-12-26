@@ -5,6 +5,7 @@ import {
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_GENERATION_CONFIG,
     DEFAULT_STAGE_DEFAULTS,
+    DEFAULT_REFINEMENT_PROMPT,
     BUILTIN_PROMPT_PRESETS,
     BUILTIN_SCHEMA_PRESETS,
     SETTINGS_VERSION,
@@ -68,7 +69,7 @@ function migrateSettings(settings: Settings): boolean {
 
     // v1 -> v2: Add preset system, stage defaults
     if (oldVersion < 2) {
-    // Migrate from old flat structure to new preset-based structure
+        // Migrate from old flat structure to new preset-based structure
 
         // Handle old useRawMode -> useCurrentSettings
         if ((settings as unknown as { useRawMode?: boolean }).useRawMode !== undefined) {
@@ -97,6 +98,23 @@ function migrateSettings(settings: Settings): boolean {
         migrated = true;
     }
 
+    // v2 -> v3: Add refinement prompt
+    if (oldVersion < 3) {
+        if (!settings.refinementPrompt) {
+            settings.refinementPrompt = DEFAULT_REFINEMENT_PROMPT;
+        }
+
+        // Add new builtin presets for iteration
+        const existingIds = new Set(settings.promptPresets.map(p => p.id));
+        for (const builtin of BUILTIN_PROMPT_PRESETS) {
+            if (!existingIds.has(builtin.id)) {
+                settings.promptPresets.push(structuredClone(builtin));
+            }
+        }
+
+        migrated = true;
+    }
+
     settings.settingsVersion = SETTINGS_VERSION;
     return migrated;
 }
@@ -112,7 +130,7 @@ function ensureSettingsIntegrity(settings: Settings): boolean {
         settings.generationConfig = structuredClone(DEFAULT_GENERATION_CONFIG);
         modified = true;
     } else {
-    // Ensure all generation config fields exist
+        // Ensure all generation config fields exist
         const gc = settings.generationConfig;
         if (gc.frequencyPenalty === undefined) { gc.frequencyPenalty = 0; modified = true; }
         if (gc.presencePenalty === undefined) { gc.presencePenalty = 0; modified = true; }
@@ -125,12 +143,18 @@ function ensureSettingsIntegrity(settings: Settings): boolean {
         modified = true;
     }
 
+    // Refinement prompt
+    if (settings.refinementPrompt === undefined) {
+        settings.refinementPrompt = DEFAULT_REFINEMENT_PROMPT;
+        modified = true;
+    }
+
     // Presets - ensure builtins exist
     if (!settings.promptPresets) {
         settings.promptPresets = [...BUILTIN_PROMPT_PRESETS];
         modified = true;
     } else {
-    // Ensure all builtins are present (user might have old version)
+        // Ensure all builtins are present (user might have old version)
         const existingIds = new Set(settings.promptPresets.map(p => p.id));
         for (const builtin of BUILTIN_PROMPT_PRESETS) {
             if (!existingIds.has(builtin.id)) {
@@ -158,7 +182,7 @@ function ensureSettingsIntegrity(settings: Settings): boolean {
         settings.stageDefaults = structuredClone(DEFAULT_STAGE_DEFAULTS);
         modified = true;
     } else {
-    // Ensure all stages have defaults
+        // Ensure all stages have defaults
         for (const stage of ['score', 'rewrite', 'analyze'] as const) {
             if (!settings.stageDefaults[stage]) {
                 settings.stageDefaults[stage] = structuredClone(DEFAULT_STAGE_DEFAULTS[stage]);
@@ -225,6 +249,20 @@ export function updateSystemPrompt(prompt: string): void {
  */
 export function resetSystemPrompt(): void {
     updateSetting('systemPrompt', DEFAULT_SYSTEM_PROMPT);
+}
+
+/**
+ * Update refinement prompt
+ */
+export function updateRefinementPrompt(prompt: string): void {
+    updateSetting('refinementPrompt', prompt);
+}
+
+/**
+ * Reset refinement prompt to default
+ */
+export function resetRefinementPrompt(): void {
+    updateSetting('refinementPrompt', DEFAULT_REFINEMENT_PROMPT);
 }
 
 /**

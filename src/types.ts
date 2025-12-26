@@ -144,6 +144,22 @@ export interface StageConfig {
 }
 
 // ============================================================================
+// ITERATION SYSTEM
+// ============================================================================
+
+export type IterationVerdict = 'accept' | 'needs_refinement' | 'regression';
+
+export interface IterationSnapshot {
+  iteration: number;
+  rewriteResponse: string;
+  rewritePreview: string;  // First 200 chars for UI display
+  analysisResponse: string;
+  analysisPreview: string;
+  verdict: IterationVerdict;
+  timestamp: number;
+}
+
+// ============================================================================
 // PIPELINE
 // ============================================================================
 
@@ -180,6 +196,11 @@ export interface PipelineState {
   currentStage: StageName | null;
   stageStatus: Record<StageName, StageStatus>;
 
+  // Iteration system
+  iterationCount: number;
+  iterationHistory: IterationSnapshot[];
+  isRefining: boolean;  // True when in refinement mode (after first analyze)
+
   // Export
   exportData: string | null;
 }
@@ -200,6 +221,9 @@ export interface Settings {
 
   // Per-stage defaults
   stageDefaults: Record<StageName, StageDefaults>;
+
+  // Refinement settings
+  refinementPrompt: string;
 
   // Debug
   debugMode: boolean;

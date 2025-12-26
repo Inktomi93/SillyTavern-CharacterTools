@@ -1,6 +1,6 @@
 // src/generator.ts
 //
-// Handles LLM generation for pipeline stages.
+// Handles LLM generation for pipeline stages and refinement.
 // Supports both ST's current settings and custom API configuration.
 
 import { getSettings } from './settings';
@@ -11,7 +11,7 @@ import type {
     PipelineState,
     StageName,
 } from './types';
-import { buildStagePrompt, getStageSchema } from './pipeline';
+import { buildStagePrompt, buildRefinementPrompt, getStageSchema } from './pipeline';
 
 // ============================================================================
 // API STATUS
@@ -104,20 +104,96 @@ export async function runStageGeneration(
         promptLength: processedPrompt.length,
     });
 
+    return await executeGeneration(
+        settings.systemPrompt,
+        processedPrompt,
+        jsonSchema,
+        signal,
+        settings.useCurrentSettings,
+    );
+}
+
+/**
+ * Run refinement generation
+ */
+export async function runRefinementGeneration(
+    state: PipelineState,
+    signal?: AbortSignal,
+): Promise<GenerationResult> {
+    const context = SillyTavern.getContext();
+    const settings = getSettings();
+
+    // Pre-flight checks
+    if (signal?.aborted) {
+        return { success: false, error: 'Generation cancelled' };
+    }
+
+    if (!state.character) {
+        return { success: false, error: 'No character selected' };
+    }
+
+    if (!state.results.rewrite || !state.results.analyze) {
+        return { success: false, error: 'Refinement requires both rewrite and analyze results' };
+    }
+
+    if (!isApiReady()) {
+        debugLog('error', 'API not ready', { onlineStatus: context.onlineStatus });
+        return { success: false, error: 'API is not connected. Check your connection settings.' };
+    }
+
+    // Build refinement prompt
+    const userPrompt = buildRefinementPrompt(state);
+    if (!userPrompt) {
+        return { success: false, error: 'Failed to build refinement prompt' };
+    }
+
+    // Substitute character placeholders
+    const processedPrompt = substituteCharacterPlaceholders(
+        userPrompt,
+        state.character.name,
+        context.name1 || 'User',
+    );
+
+    debugLog('info', 'Starting refinement generation', {
+        iteration: state.iterationCount + 1,
+        character: state.character.name,
+        promptLength: processedPrompt.length,
+    });
+
+    // Refinement doesn't use structured output - we want free-form character card
+    return await executeGeneration(
+        settings.systemPrompt,
+        processedPrompt,
+        null,
+        signal,
+        settings.useCurrentSettings,
+    );
+}
+
+/**
+ * Core generation execution
+ */
+async function executeGeneration(
+    systemPrompt: string,
+    userPrompt: string,
+    jsonSchema: StructuredOutputSchema | null,
+    signal: AbortSignal | undefined,
+    useCurrentSettings: boolean,
+): Promise<GenerationResult> {
     try {
         let response: string;
 
-        if (settings.useCurrentSettings) {
+        if (useCurrentSettings) {
             response = await generateWithCurrentSettings(
-                settings.systemPrompt,
-                processedPrompt,
+                systemPrompt,
+                userPrompt,
                 jsonSchema,
                 signal,
             );
         } else {
             response = await generateWithCustomSettings(
-                settings.systemPrompt,
-                processedPrompt,
+                systemPrompt,
+                userPrompt,
                 jsonSchema,
                 signal,
             );
@@ -133,8 +209,7 @@ export async function runStageGeneration(
             return { success: false, error: 'Empty response from API' };
         }
 
-        debugLog('info', 'Stage generation complete', {
-            stage,
+        debugLog('info', 'Generation complete', {
             responseLength: response.length,
             isStructured: !!jsonSchema,
         });
@@ -145,7 +220,7 @@ export async function runStageGeneration(
             isStructured: !!jsonSchema,
         };
     } catch (err) {
-    // Handle abort errors gracefully
+        // Handle abort errors gracefully
         if ((err as Error).name === 'AbortError' || signal?.aborted) {
             debugLog('info', 'Generation aborted', null);
             return { success: false, error: 'Generation cancelled' };
@@ -377,6 +452,36 @@ export async function getStageTokenCount(
         };
     } catch (e) {
         debugLog('error', 'Token count failed', e);
+        return null;
+    }
+}
+
+/**
+ * Get token count for refinement prompt
+ */
+export async function getRefinementTokenCount(
+    state: PipelineState,
+): Promise<{ promptTokens: number; contextSize: number; percentage: number } | null> {
+    const { getTokenCountAsync, maxContext } = SillyTavern.getContext();
+    const settings = getSettings();
+
+    if (!state.character || !state.results.rewrite || !state.results.analyze) return null;
+
+    try {
+        const prompt = buildRefinementPrompt(state);
+        if (!prompt) return null;
+
+        const fullPrompt = settings.systemPrompt + '\n\n' + prompt;
+        const promptTokens = await getTokenCountAsync(fullPrompt);
+        const percentage = Math.round((promptTokens / maxContext) * 100);
+
+        return {
+            promptTokens,
+            contextSize: maxContext,
+            percentage,
+        };
+    } catch (e) {
+        debugLog('error', 'Refinement token count failed', e);
         return null;
     }
 }

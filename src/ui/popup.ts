@@ -18,12 +18,18 @@ import {
     clearStageResult,
     getNextStage,
     canRunStage,
+    canRefine,
     validatePipeline,
+    validateRefinement,
     setExportData,
     buildStagePrompt,
     getStageSchema,
+    startRefinement,
+    completeRefinement,
+    acceptRewrite,
+    revertToIteration,
 } from '../pipeline';
-import { runStageGeneration, getStageTokenCount, getApiInfo, isApiReady } from '../generator';
+import { runStageGeneration, runRefinementGeneration, getStageTokenCount, getRefinementTokenCount, getApiInfo, isApiReady } from '../generator';
 import { renderCharacterSelect, updateCharacterSelectState, renderDropdownItems, updateFieldTokenCounts } from './components/character-select';
 import { getPopulatedFields } from '../character';
 import { renderPipelineNav, updatePipelineNavState } from './components/pipeline-nav';
@@ -37,9 +43,10 @@ import {
     handleFormatSchema,
     handleGenerateSchema,
 } from './components/stage-config';
-import { renderResultsPanel, updateResultsPanelState } from './components/results-panel';
+import { renderResultsPanel, updateResultsPanelState, renderRefinementLoading } from './components/results-panel';
+import { renderIterationHistory, updateIterationHistoryState, renderIterationViewContent } from './components/iteration-history';
 import { openSettingsModal } from './settings-modal';
-import type { PipelineState, StageName, Character } from '../types';
+import type { PipelineState, StageName, Character, IterationSnapshot } from '../types';
 
 // ============================================================================
 // STATE
@@ -48,6 +55,7 @@ import type { PipelineState, StageName, Character } from '../types';
 let popupState: {
     pipeline: PipelineState;
     isGenerating: boolean;
+    isRefining: boolean;
     abortController: AbortController | null;
     activeStageView: StageName;
     characters: Character[];
@@ -82,7 +90,6 @@ function subscribeEvents(): void {
 
         onPresetChanged: () => {
             debugLog('info', 'OAI preset changed', null);
-            // If using current settings, token estimates may change
             if (popupState) {
                 updateTokenEstimate();
             }
@@ -144,7 +151,6 @@ function updateApiStatus(): void {
         }
     }
 
-    // Update run buttons based on API status
     updatePipelineNav();
 }
 
@@ -155,16 +161,12 @@ function refreshSelectedCharacter(): void {
     const charList = characters as Character[];
     const index = popupState.pipeline.characterIndex;
 
-    // Update our cached character list
     popupState.characters = charList;
 
-    // Check if the character still exists at this index
     if (index >= 0 && index < charList.length) {
         const updatedChar = charList[index];
 
-        // Check if it's the same character (by name, since that's our best identifier)
         if (updatedChar.name === popupState.pipeline.character?.name) {
-            // Same character, update the reference
             popupState.pipeline = {
                 ...popupState.pipeline,
                 character: updatedChar,
@@ -173,11 +175,9 @@ function refreshSelectedCharacter(): void {
             updateTokenEstimate();
             debugLog('info', 'Character refreshed', { name: updatedChar.name });
         } else {
-            // Different character at this index - character was probably deleted/reordered
             handleCharacterInvalidated();
         }
     } else {
-        // Index out of bounds
         handleCharacterInvalidated();
     }
 }
@@ -190,11 +190,9 @@ function handleCharacterDeleted(deletedId: number): void {
     if (currentIndex === null) return;
 
     if (currentIndex === deletedId) {
-        // Our selected character was deleted
         handleCharacterInvalidated();
         toastr.warning('Selected character was deleted');
     } else if (currentIndex > deletedId) {
-        // Character before ours was deleted, our index shifted down
         const newIndex = currentIndex - 1;
         const { characters } = SillyTavern.getContext();
         const charList = characters as Character[];
@@ -211,7 +209,6 @@ function handleCharacterDeleted(deletedId: number): void {
             handleCharacterInvalidated();
         }
     }
-    // If deleted index > current index, no change needed
 }
 
 function handleCharacterInvalidated(): void {
@@ -232,20 +229,19 @@ let documentClickHandler: ((e: MouseEvent) => void) | null = null;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 
 function initGlobalListeners(): void {
-    // Keyboard shortcuts
     keyboardHandler = (e: KeyboardEvent) => {
         if (!popupState) return;
 
         // Ctrl+Enter to run current stage
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
-            if (!popupState.isGenerating) {
+            if (!popupState.isGenerating && !popupState.isRefining) {
                 runSingleStage(popupState.activeStageView);
             }
         }
 
         // Escape to cancel generation
-        if (e.key === 'Escape' && popupState.isGenerating && popupState.abortController) {
+        if (e.key === 'Escape' && (popupState.isGenerating || popupState.isRefining) && popupState.abortController) {
             popupState.abortController.abort();
         }
     };
@@ -274,10 +270,10 @@ export async function openMainPopup(): Promise<void> {
 
     const charList = characters as Character[];
 
-    // Initialize state
     popupState = {
         pipeline: createPipelineState(),
         isGenerating: false,
+        isRefining: false,
         abortController: null,
         activeStageView: 'score',
         characters: charList,
@@ -294,7 +290,6 @@ export async function openMainPopup(): Promise<void> {
     });
 
     popup.show().then(() => {
-        // Cleanup on close
         if (popupState?.abortController) {
             popupState.abortController.abort();
         }
@@ -305,12 +300,10 @@ export async function openMainPopup(): Promise<void> {
         debugLog('info', 'Popup closed', null);
     });
 
-    // Wait for DOM
     await new Promise<void>(resolve => setTimeout(resolve, 0));
 
     popupElement = document.getElementById(`${MODULE_NAME}_popup`);
 
-    // Initialize
     subscribeEvents();
     initGlobalListeners();
     initComponents(charList);
@@ -380,8 +373,10 @@ function buildPopupContent(): string {
         <div class="${MODULE_NAME}_section_header">
           <i class="fa-solid fa-file-lines"></i>
           <span>Results</span>
+          <span id="${MODULE_NAME}_iteration_indicator" class="${MODULE_NAME}_iteration_indicator hidden"></span>
         </div>
         <div id="${MODULE_NAME}_results_container"></div>
+        <div id="${MODULE_NAME}_iteration_history_container"></div>
       </div>
     </div>
   `;
@@ -436,10 +431,20 @@ function initComponents(characters: Character[]): void {
         initResultsPanelListeners();
     }
 
+    // Iteration history
+    const historyContainer = popupElement.querySelector(`#${MODULE_NAME}_iteration_history_container`);
+    if (historyContainer) {
+        historyContainer.innerHTML = renderIterationHistory(
+            popupState.pipeline.iterationHistory,
+            popupState.pipeline.iterationCount,
+            handleRevertToIteration,
+        );
+        initIterationHistoryListeners();
+    }
+
     // Header buttons
     popupElement.querySelector(`#${MODULE_NAME}_settings_btn`)?.addEventListener('click', () => {
         openSettingsModal(() => {
-            // Refresh on settings close
             updateAllComponents();
         });
     });
@@ -469,8 +474,6 @@ function initCharacterSelectListeners(characters: Character[]): void {
     const dropdown = container.querySelector(`#${MODULE_NAME}_char_dropdown`) as HTMLElement;
 
     if (!searchInput || !dropdown) return;
-
-    // DELETED: the unused fuse and charData declarations
 
     let selectedIndex = -1;
     let currentResults: Array<{ char: Character; index: number }> = [];
@@ -513,7 +516,6 @@ function initCharacterSelectListeners(characters: Character[]): void {
     const debouncedSearch = lodash.debounce(handleSearch, 150);
     searchInput.addEventListener('input', debouncedSearch);
 
-    // Keyboard navigation
     searchInput.addEventListener('keydown', (e) => {
         if (currentResults.length === 0) return;
 
@@ -536,7 +538,6 @@ function initCharacterSelectListeners(characters: Character[]): void {
         }
     });
 
-    // Click outside to close dropdown
     documentClickHandler = (e: MouseEvent) => {
         if (!searchInput.contains(e.target as Node) && !dropdown.contains(e.target as Node)) {
             dropdown.classList.add('hidden');
@@ -544,7 +545,6 @@ function initCharacterSelectListeners(characters: Character[]): void {
     };
     document.addEventListener('click', documentClickHandler);
 
-    // Dropdown click
     dropdown.addEventListener('click', (e) => {
         const item = (e.target as HTMLElement).closest(`.${MODULE_NAME}_dropdown_item`);
         if (item) {
@@ -558,11 +558,9 @@ function initCharacterSelectListeners(characters: Character[]): void {
         }
     });
 
-    // Event delegation for dynamically created elements
     container.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
 
-        // Clear button
         if (target.closest(`#${MODULE_NAME}_char_clear`)) {
             if (!popupState) return;
             popupState.pipeline = setCharacter(popupState.pipeline, null, null);
@@ -570,7 +568,6 @@ function initCharacterSelectListeners(characters: Character[]): void {
             return;
         }
 
-        // Field expansion toggles
         const toggle = target.closest(`.${MODULE_NAME}_field_toggle`);
         if (toggle) {
             const fieldKey = toggle.getAttribute('data-field');
@@ -592,7 +589,6 @@ function selectCharacter(char: Character, index: number): void {
     popupState.pipeline = setCharacter(popupState.pipeline, char, index);
     updateAllComponents();
 
-    // Update field token counts after a short delay
     setTimeout(async () => {
         if (!popupElement || !popupState?.pipeline.character) return;
 
@@ -616,7 +612,6 @@ function initPipelineNavListeners(): void {
     const container = popupElement.querySelector(`#${MODULE_NAME}_pipeline_nav_container`);
     if (!container) return;
 
-    // Stage toggle checkboxes
     container.addEventListener('change', (e) => {
         const checkbox = e.target as HTMLInputElement;
         if (checkbox.classList.contains(`${MODULE_NAME}_stage_checkbox`)) {
@@ -628,7 +623,6 @@ function initPipelineNavListeners(): void {
         }
     });
 
-    // Stage view buttons
     container.addEventListener('click', (e) => {
         const btn = (e.target as HTMLElement).closest(`.${MODULE_NAME}_stage_btn`);
         if (btn && popupState) {
@@ -642,7 +636,6 @@ function initPipelineNavListeners(): void {
             }
         }
 
-        // Run buttons
         const runBtn = (e.target as HTMLElement).closest(`#${MODULE_NAME}_run_selected_btn`);
         if (runBtn) {
             runSelectedStages();
@@ -671,7 +664,6 @@ function initStageConfigListeners(): void {
     const container = popupElement.querySelector(`#${MODULE_NAME}_stage_config_container`);
     if (!container) return;
 
-    // Prompt preset select
     container.addEventListener('change', (e) => {
         const select = e.target as HTMLSelectElement;
 
@@ -693,7 +685,6 @@ function initStageConfigListeners(): void {
         }
     });
 
-    // Custom prompt textarea
     const { lodash } = SillyTavern.libs;
     container.addEventListener('input', lodash.debounce((e: Event) => {
         const textarea = e.target as HTMLTextAreaElement;
@@ -716,7 +707,6 @@ function initStageConfigListeners(): void {
         }
     }, 300));
 
-    // Structured output toggle
     container.addEventListener('change', (e) => {
         const checkbox = e.target as HTMLInputElement;
         if (checkbox.id === `${MODULE_NAME}_use_structured` && popupState) {
@@ -727,18 +717,15 @@ function initStageConfigListeners(): void {
         }
     });
 
-    // Click handlers for buttons
     container.addEventListener('click', async (e) => {
         const target = e.target as HTMLElement;
 
-        // Run stage button
         const runBtn = target.closest(`#${MODULE_NAME}_run_stage_btn`);
         if (runBtn && popupState) {
             runSingleStage(popupState.activeStageView);
             return;
         }
 
-        // Save prompt preset button
         const savePromptBtn = target.closest(`#${MODULE_NAME}_save_prompt_preset_btn`);
         if (savePromptBtn && popupState) {
             const promptTextarea = popupElement?.querySelector(`#${MODULE_NAME}_custom_prompt`) as HTMLTextAreaElement;
@@ -755,7 +742,6 @@ function initStageConfigListeners(): void {
             return;
         }
 
-        // Save schema preset button
         const saveSchemaBtn = target.closest(`#${MODULE_NAME}_save_schema_preset_btn`);
         if (saveSchemaBtn && popupState) {
             const schemaTextarea = popupElement?.querySelector(`#${MODULE_NAME}_custom_schema`) as HTMLTextAreaElement;
@@ -772,7 +758,6 @@ function initStageConfigListeners(): void {
             return;
         }
 
-        // Generate schema button
         const generateBtn = target.closest(`#${MODULE_NAME}_generate_schema_btn`);
         if (generateBtn && popupState) {
             const generated = await handleGenerateSchema();
@@ -790,7 +775,6 @@ function initStageConfigListeners(): void {
             return;
         }
 
-        // Validate schema button
         const validateBtn = target.closest(`#${MODULE_NAME}_validate_schema_btn`);
         if (validateBtn && popupState) {
             const schemaTextarea = popupElement?.querySelector(`#${MODULE_NAME}_custom_schema`) as HTMLTextAreaElement;
@@ -800,7 +784,6 @@ function initStageConfigListeners(): void {
             return;
         }
 
-        // Fix schema button
         const fixBtn = target.closest(`#${MODULE_NAME}_fix_schema_btn`);
         if (fixBtn && popupState) {
             const schemaTextarea = popupElement?.querySelector(`#${MODULE_NAME}_custom_schema`) as HTMLTextAreaElement;
@@ -818,7 +801,6 @@ function initStageConfigListeners(): void {
             return;
         }
 
-        // Format schema button
         const formatBtn = target.closest(`#${MODULE_NAME}_format_schema_btn`);
         if (formatBtn && popupState) {
             const schemaTextarea = popupElement?.querySelector(`#${MODULE_NAME}_custom_schema`) as HTMLTextAreaElement;
@@ -879,6 +861,18 @@ function initResultsPanelListeners(): void {
             }
         }
 
+        // Refine
+        if (target.closest(`#${MODULE_NAME}_refine_btn`) && popupState) {
+            runRefinement();
+        }
+
+        // Accept rewrite
+        if (target.closest(`#${MODULE_NAME}_accept_btn`) && popupState) {
+            popupState.pipeline = acceptRewrite(popupState.pipeline);
+            toastr.success('Rewrite accepted as final');
+            updateAllComponents();
+        }
+
         // Copy
         if (target.closest(`#${MODULE_NAME}_copy_btn`) && popupState) {
             const result = popupState.pipeline.results[popupState.activeStageView];
@@ -905,13 +899,79 @@ function initResultsPanelListeners(): void {
 }
 
 // ============================================================================
+// ITERATION HISTORY LISTENERS
+// ============================================================================
+
+function initIterationHistoryListeners(): void {
+    if (!popupElement || !popupState) return;
+
+    const container = popupElement.querySelector(`#${MODULE_NAME}_iteration_history_container`);
+    if (!container) return;
+
+    container.addEventListener('click', async (e) => {
+        const target = e.target as HTMLElement;
+
+        // Revert button
+        const revertBtn = target.closest(`.${MODULE_NAME}_iteration_revert_btn`);
+        if (revertBtn && popupState) {
+            const index = parseInt(revertBtn.getAttribute('data-index') || '-1', 10);
+            if (index >= 0) {
+                await handleRevertToIteration(index);
+            }
+        }
+
+        // View button
+        const viewBtn = target.closest(`.${MODULE_NAME}_iteration_view_btn`);
+        if (viewBtn && popupState) {
+            const index = parseInt(viewBtn.getAttribute('data-index') || '-1', 10);
+            if (index >= 0 && index < popupState.pipeline.iterationHistory.length) {
+                showIterationView(popupState.pipeline.iterationHistory[index]);
+            }
+        }
+    });
+}
+
+async function handleRevertToIteration(index: number): Promise<void> {
+    if (!popupState) return;
+
+    const { Popup, POPUP_RESULT } = SillyTavern.getContext();
+
+    const confirmed = await Popup.show.confirm(
+        'Revert to Previous Iteration?',
+        `This will restore the rewrite from iteration #${index + 1} and discard later changes.`,
+    );
+
+    if (confirmed !== POPUP_RESULT.AFFIRMATIVE) return;
+
+    popupState.pipeline = revertToIteration(popupState.pipeline, index);
+    toastr.info(`Reverted to iteration #${index + 1}`);
+    updateAllComponents();
+}
+
+async function showIterationView(snap: IterationSnapshot): Promise<void> {
+    const { Popup, POPUP_TYPE } = SillyTavern.getContext();
+    const { DOMPurify } = SillyTavern.libs;
+
+    const content = renderIterationViewContent(snap);
+
+    const popup = new Popup(DOMPurify.sanitize(content), POPUP_TYPE.TEXT, '', {
+        wide: true,
+        large: true,
+        allowVerticalScrolling: true,
+        okButton: 'Close',
+        cancelButton: false,
+    });
+
+    await popup.show();
+}
+
+// ============================================================================
 // GENERATION
 // ============================================================================
 
 async function runSingleStage(stage: StageName): Promise<void> {
-    if (!popupState || popupState.isGenerating) return;
+    if (!popupState || popupState.isGenerating || popupState.isRefining) return;
 
-    // Check API status first
     if (!isApiReady()) {
         toastr.error('API is not connected');
         return;
@@ -932,7 +992,6 @@ async function runSingleStage(stage: StageName): Promise<void> {
     popupState.pipeline = startStage(popupState.pipeline, stage);
     updateAllComponents();
 
-    // Capture the prompt and schema BEFORE generation
     const promptUsed = buildStagePrompt(popupState.pipeline, stage) || '';
     const schemaUsed = getStageSchema(popupState.pipeline, stage);
 
@@ -968,9 +1027,8 @@ async function runSingleStage(stage: StageName): Promise<void> {
 }
 
 async function runSelectedStages(): Promise<void> {
-    if (!popupState || popupState.isGenerating) return;
+    if (!popupState || popupState.isGenerating || popupState.isRefining) return;
 
-    // Check API status first
     if (!isApiReady()) {
         toastr.error('API is not connected');
         return;
@@ -997,7 +1055,6 @@ async function runSelectedStages(): Promise<void> {
 
         await runSingleStage(stage);
 
-        // Stop if generation was cancelled or failed
         if (!popupState) break;
 
         const newStatus = popupState.pipeline.stageStatus[stage];
@@ -1010,11 +1067,80 @@ async function runSelectedStages(): Promise<void> {
 async function runAllStages(): Promise<void> {
     if (!popupState) return;
 
-    // Select all stages first
     popupState.pipeline.selectedStages = [...STAGES];
     updatePipelineNav();
 
     await runSelectedStages();
+}
+
+async function runRefinement(): Promise<void> {
+    if (!popupState || popupState.isGenerating || popupState.isRefining) return;
+
+    if (!isApiReady()) {
+        toastr.error('API is not connected');
+        return;
+    }
+
+    const canRefineResult = canRefine(popupState.pipeline);
+    if (!canRefineResult.canRun) {
+        toastr.warning(canRefineResult.reason || 'Cannot refine');
+        return;
+    }
+
+    const validation = validateRefinement(popupState.pipeline);
+    if (!validation.valid) {
+        toastr.error(validation.errors.join('\n'));
+        return;
+    }
+
+    if (validation.warnings.length > 0) {
+        toastr.warning(validation.warnings.join('\n'));
+    }
+
+    // Start refinement - this snapshots current state
+    popupState.pipeline = startRefinement(popupState.pipeline);
+    popupState.isRefining = true;
+    popupState.abortController = new AbortController();
+
+    // Show refinement loading state
+    const resultsContainer = popupElement?.querySelector(`#${MODULE_NAME}_results_container`);
+    if (resultsContainer) {
+        resultsContainer.innerHTML = renderRefinementLoading(popupState.pipeline.iterationCount);
+    }
+
+    updateIterationIndicator();
+    updateIterationHistory();
+
+    try {
+        const result = await runRefinementGeneration(
+            popupState.pipeline,
+            popupState.abortController.signal,
+        );
+
+        if (result.success) {
+            popupState.pipeline = completeRefinement(popupState.pipeline, {
+                response: result.response,
+                isStructured: false,
+                promptUsed: '[Refinement prompt]',
+                schemaUsed: null,
+            });
+
+            toastr.success(`Refinement #${popupState.pipeline.iterationCount} complete`);
+
+            // Switch to analyze view so user can review
+            popupState.activeStageView = 'analyze';
+        } else {
+            if (result.error !== 'Generation cancelled') {
+                toastr.error(result.error);
+            }
+        }
+    } catch (e) {
+        toastr.error((e as Error).message);
+    } finally {
+        popupState.isRefining = false;
+        popupState.abortController = null;
+        updateAllComponents();
+    }
 }
 
 // ============================================================================
@@ -1027,6 +1153,8 @@ function updateAllComponents(): void {
     updateStageSection();
     updateResultsPanel();
     updateTokenEstimate();
+    updateIterationIndicator();
+    updateIterationHistory();
 }
 
 function updateCharacterSelect(): void {
@@ -1053,7 +1181,7 @@ function updatePipelineNav(): void {
             popupState.pipeline.stageStatus,
             popupState.activeStageView,
             !!popupState.pipeline.character && isApiReady(),
-            popupState.isGenerating,
+            popupState.isGenerating || popupState.isRefining,
         );
     }
 }
@@ -1061,7 +1189,6 @@ function updatePipelineNav(): void {
 function updateStageSection(): void {
     if (!popupElement || !popupState) return;
 
-    // Update header
     const icon = popupElement.querySelector(`#${MODULE_NAME}_stage_icon`);
     const title = popupElement.querySelector(`#${MODULE_NAME}_stage_title`);
 
@@ -1084,7 +1211,7 @@ function updateStageConfigUI(): void {
             container as HTMLElement,
             popupState.activeStageView,
             popupState.pipeline.configs[popupState.activeStageView],
-            popupState.isGenerating,
+            popupState.isGenerating || popupState.isRefining,
         );
     }
 }
@@ -1106,6 +1233,36 @@ function updateResultsPanel(): void {
     }
 }
 
+function updateIterationIndicator(): void {
+    if (!popupElement || !popupState) return;
+
+    const indicator = popupElement.querySelector(`#${MODULE_NAME}_iteration_indicator`);
+    if (!indicator) return;
+
+    if (popupState.pipeline.iterationCount > 0 || popupState.pipeline.isRefining) {
+        indicator.classList.remove('hidden');
+        indicator.innerHTML = `
+      <i class="fa-solid fa-arrows-rotate"></i>
+      Iteration #${popupState.pipeline.iterationCount + 1}
+    `;
+    } else {
+        indicator.classList.add('hidden');
+    }
+}
+
+function updateIterationHistory(): void {
+    if (!popupElement || !popupState) return;
+
+    const container = popupElement.querySelector(`#${MODULE_NAME}_iteration_history_container`);
+    if (container) {
+        updateIterationHistoryState(
+            container as HTMLElement,
+            popupState.pipeline.iterationHistory,
+            popupState.pipeline.iterationCount,
+        );
+    }
+}
+
 async function updateTokenEstimate(): Promise<void> {
     if (!popupElement || !popupState) return;
 
@@ -1118,13 +1275,17 @@ async function updateTokenEstimate(): Promise<void> {
         return;
     }
 
-    // Show loading state
     tokenEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
     tokenEl.className = `${MODULE_NAME}_token_estimate`;
 
-    const counts = await getStageTokenCount(popupState.pipeline, popupState.activeStageView);
+    // Use refinement token count if we're in refinement mode
+    let counts;
+    if (popupState.pipeline.isRefining && popupState.pipeline.results.rewrite && popupState.pipeline.results.analyze) {
+        counts = await getRefinementTokenCount(popupState.pipeline);
+    } else {
+        counts = await getStageTokenCount(popupState.pipeline, popupState.activeStageView);
+    }
 
-    // Check we're still on the same state
     if (!popupState || !popupElement) return;
 
     if (!counts) {

@@ -1,5 +1,5 @@
 # PROJECT SNAPSHOT
-Generated: Thu Dec 25 12:34:25 AM MST 2025
+Generated: Fri Dec 26 06:57:45 AM MST 2025
 
 ## DIRECTORY STRUCTURE
 ```
@@ -28,6 +28,7 @@ Generated: Thu Dec 25 12:34:25 AM MST 2025
 │   └── ui
 │       ├── components
 │       │   ├── character-select.ts
+│       │   ├── iteration-history.ts
 │       │   ├── pipeline-nav.ts
 │       │   ├── results-panel.ts
 │       │   └── stage-config.ts
@@ -229,6 +230,22 @@ export interface StageConfig {
 }
 
 // ============================================================================
+// ITERATION SYSTEM
+// ============================================================================
+
+export type IterationVerdict = 'accept' | 'needs_refinement' | 'regression';
+
+export interface IterationSnapshot {
+  iteration: number;
+  rewriteResponse: string;
+  rewritePreview: string;  // First 200 chars for UI display
+  analysisResponse: string;
+  analysisPreview: string;
+  verdict: IterationVerdict;
+  timestamp: number;
+}
+
+// ============================================================================
 // PIPELINE
 // ============================================================================
 
@@ -265,6 +282,11 @@ export interface PipelineState {
   currentStage: StageName | null;
   stageStatus: Record<StageName, StageStatus>;
 
+  // Iteration system
+  iterationCount: number;
+  iterationHistory: IterationSnapshot[];
+  isRefining: boolean;  // True when in refinement mode (after first analyze)
+
   // Export
   exportData: string | null;
 }
@@ -285,6 +307,9 @@ export interface Settings {
 
   // Per-stage defaults
   stageDefaults: Record<StageName, StageDefaults>;
+
+  // Refinement settings
+  refinementPrompt: string;
 
   // Debug
   debugMode: boolean;
@@ -387,7 +412,7 @@ import type {
 
 export const MODULE_NAME = 'character_tools';
 export const EXTENSION_PATH = 'third-party/my-extension';
-export const SETTINGS_VERSION = 2;  // Bump when settings structure changes
+export const SETTINGS_VERSION = 3;  // Bump for refinement additions
 
 // ============================================================================
 // CHARACTER FIELDS
@@ -438,10 +463,46 @@ Adapt your response style to the task:
 - For scoring: Be critical but fair, rate 1-10 with specific justifications
 - For rewrites: Preserve the character's core identity while improving weak areas
 - For analysis: Compare versions objectively, identify what was lost or gained
+- For refinement: Address specific issues from analysis while keeping improvements
 
 Focus on: writing quality, character depth, consistency, roleplay usability, and potential issues (contradictions, clichés, underdeveloped areas).
 
 Always maintain the character's essential personality and unique traits. Improvements should enhance, not replace, what makes the character interesting.`;
+
+// ============================================================================
+// DEFAULT REFINEMENT PROMPT
+// ============================================================================
+
+export const DEFAULT_REFINEMENT_PROMPT = `You are refining a character card rewrite based on analysis feedback.
+
+## Original Character (Ground Truth)
+{{original_character}}
+
+## Current Rewrite (Iteration {{iteration_number}})
+{{current_rewrite}}
+
+## Analysis of Current Rewrite
+{{current_analysis}}
+
+{{#if score_results}}
+## Original Score Feedback (Reference)
+{{score_results}}
+{{/if}}
+
+---
+
+## Your Task
+
+Create an improved version that:
+
+1. **Addresses Issues**: Fix the specific problems identified in the analysis
+2. **Preserves Wins**: Keep what the analysis said was working well
+3. **Maintains Soul**: The character must still feel like the original, just better
+4. **Avoids Regression**: Don't reintroduce problems that were already fixed
+
+Output the complete refined character card with all fields. Mark significantly changed sections with [REFINED] at the start.
+
+Do NOT explain your changes - just output the improved character card.`;
 
 // ============================================================================
 // BUILTIN PROMPT PRESETS
@@ -573,8 +634,11 @@ Don't change the core concept, but make it shine. Output the complete expanded c
 ## Soul Check
 Does the rewritten version still feel like the same character? Rate the "soul preservation" from 1-10 and explain.
 
-## Recommendations
-If anything important was lost, suggest how to restore it while keeping the improvements.
+## Verdict
+State clearly: **ACCEPT** (ready to use), **NEEDS REFINEMENT** (good progress but has issues), or **REGRESSION** (worse than before).
+
+## Specific Issues to Address
+If verdict is NEEDS REFINEMENT, list the specific problems that should be fixed in the next iteration.
 
 ---
 
@@ -588,6 +652,54 @@ If anything important was lost, suggest how to restore it while keeping the impr
 {{score_results}}`,
     },
     {
+        id: 'builtin_analyze_iteration',
+        name: 'Iteration Analyze',
+        stages: ['analyze'],
+        isBuiltin: true,
+        createdAt: 0,
+        updatedAt: 0,
+        prompt: `This is iteration {{iteration_number}} of refinement. Compare the current rewrite against the original.
+
+## Progress Check
+- What issues from previous analysis were addressed?
+- What new issues (if any) were introduced?
+- Is this version better, worse, or lateral move from the last?
+
+## Current State Assessment
+
+### Preserved from Original
+Core traits and elements that remain intact.
+
+### Still Missing or Lost
+Things from the original that should be restored.
+
+### Successfully Improved
+What's genuinely better now.
+
+### New Problems
+Any issues introduced by this iteration.
+
+## Soul Preservation Score
+Rate 1-10: Does this still feel like the original character?
+
+## Verdict
+**ACCEPT** - Ready to use, no more iterations needed
+**NEEDS REFINEMENT** - Making progress, but specific issues remain
+**REGRESSION** - This iteration made things worse, consider reverting
+
+## Next Steps
+If NEEDS REFINEMENT: List exactly what the next iteration should fix.
+If REGRESSION: Explain what went wrong and what to preserve from previous version.
+
+---
+
+### Original Character:
+{{original_character}}
+
+### Current Rewrite (Iteration {{iteration_number}}):
+{{rewrite_results}}`,
+    },
+    {
         id: 'builtin_analyze_quick',
         name: 'Quick Analyze',
         stages: ['analyze'],
@@ -599,7 +711,7 @@ If anything important was lost, suggest how to restore it while keeping the impr
 1. Soul preserved? (Yes/Partially/No)
 2. Best improvement made
 3. Biggest thing lost (if any)
-4. Keep this version? (Yes/No/Needs tweaks)
+4. Verdict: ACCEPT / NEEDS REFINEMENT / REGRESSION
 
 {{original_character}}
 
@@ -699,16 +811,20 @@ const ANALYZE_SCHEMA: StructuredOutputSchema = {
             },
             soulPreservationScore: { type: 'number' },
             soulAssessment: { type: 'string' },
+            verdict: {
+                type: 'string',
+                enum: ['ACCEPT', 'NEEDS_REFINEMENT', 'REGRESSION'],
+            },
+            issuesToAddress: {
+                type: 'array',
+                items: { type: 'string' },
+            },
             recommendations: {
                 type: 'array',
                 items: { type: 'string' },
             },
-            keepVersion: {
-                type: 'string',
-                enum: ['yes', 'no', 'needs_tweaks'],
-            },
         },
-        required: ['preserved', 'lost', 'gained', 'soulPreservationScore', 'soulAssessment', 'recommendations', 'keepVersion'],
+        required: ['preserved', 'lost', 'gained', 'soulPreservationScore', 'soulAssessment', 'verdict', 'issuesToAddress', 'recommendations'],
     },
 };
 
@@ -795,6 +911,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
     promptPresets: [...BUILTIN_PROMPT_PRESETS],
     schemaPresets: [...BUILTIN_SCHEMA_PRESETS],
     stageDefaults: DEFAULT_STAGE_DEFAULTS,
+    refinementPrompt: DEFAULT_REFINEMENT_PROMPT,
     debugMode: false,
     settingsVersion: SETTINGS_VERSION,
 });
@@ -808,6 +925,9 @@ export const TEMPLATE_PLACEHOLDERS = {
     ORIGINAL_CHARACTER: '{{original_character}}',
     SCORE_RESULTS: '{{score_results}}',
     REWRITE_RESULTS: '{{rewrite_results}}',
+    CURRENT_REWRITE: '{{current_rewrite}}',
+    CURRENT_ANALYSIS: '{{current_analysis}}',
+    ITERATION_NUMBER: '{{iteration_number}}',
     CHARACTER_NAME: '{{char_name}}',
     USER_NAME: '{{user_name}}',
 } as const;
@@ -828,6 +948,7 @@ export const DEBOUNCE_DELAY = {
 
 export const MAX_DROPDOWN_RESULTS = 10;
 export const MAX_DEBUG_LOG_ENTRIES = 100;
+export const MAX_ITERATION_HISTORY = 20;  // Don't keep more than this many snapshots
 
 // ============================================================================
 // CSS CLASS PREFIX
@@ -859,6 +980,7 @@ import {
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_GENERATION_CONFIG,
     DEFAULT_STAGE_DEFAULTS,
+    DEFAULT_REFINEMENT_PROMPT,
     BUILTIN_PROMPT_PRESETS,
     BUILTIN_SCHEMA_PRESETS,
     SETTINGS_VERSION,
@@ -922,7 +1044,7 @@ function migrateSettings(settings: Settings): boolean {
 
     // v1 -> v2: Add preset system, stage defaults
     if (oldVersion < 2) {
-    // Migrate from old flat structure to new preset-based structure
+        // Migrate from old flat structure to new preset-based structure
 
         // Handle old useRawMode -> useCurrentSettings
         if ((settings as unknown as { useRawMode?: boolean }).useRawMode !== undefined) {
@@ -951,6 +1073,23 @@ function migrateSettings(settings: Settings): boolean {
         migrated = true;
     }
 
+    // v2 -> v3: Add refinement prompt
+    if (oldVersion < 3) {
+        if (!settings.refinementPrompt) {
+            settings.refinementPrompt = DEFAULT_REFINEMENT_PROMPT;
+        }
+
+        // Add new builtin presets for iteration
+        const existingIds = new Set(settings.promptPresets.map(p => p.id));
+        for (const builtin of BUILTIN_PROMPT_PRESETS) {
+            if (!existingIds.has(builtin.id)) {
+                settings.promptPresets.push(structuredClone(builtin));
+            }
+        }
+
+        migrated = true;
+    }
+
     settings.settingsVersion = SETTINGS_VERSION;
     return migrated;
 }
@@ -966,7 +1105,7 @@ function ensureSettingsIntegrity(settings: Settings): boolean {
         settings.generationConfig = structuredClone(DEFAULT_GENERATION_CONFIG);
         modified = true;
     } else {
-    // Ensure all generation config fields exist
+        // Ensure all generation config fields exist
         const gc = settings.generationConfig;
         if (gc.frequencyPenalty === undefined) { gc.frequencyPenalty = 0; modified = true; }
         if (gc.presencePenalty === undefined) { gc.presencePenalty = 0; modified = true; }
@@ -979,12 +1118,18 @@ function ensureSettingsIntegrity(settings: Settings): boolean {
         modified = true;
     }
 
+    // Refinement prompt
+    if (settings.refinementPrompt === undefined) {
+        settings.refinementPrompt = DEFAULT_REFINEMENT_PROMPT;
+        modified = true;
+    }
+
     // Presets - ensure builtins exist
     if (!settings.promptPresets) {
         settings.promptPresets = [...BUILTIN_PROMPT_PRESETS];
         modified = true;
     } else {
-    // Ensure all builtins are present (user might have old version)
+        // Ensure all builtins are present (user might have old version)
         const existingIds = new Set(settings.promptPresets.map(p => p.id));
         for (const builtin of BUILTIN_PROMPT_PRESETS) {
             if (!existingIds.has(builtin.id)) {
@@ -1012,7 +1157,7 @@ function ensureSettingsIntegrity(settings: Settings): boolean {
         settings.stageDefaults = structuredClone(DEFAULT_STAGE_DEFAULTS);
         modified = true;
     } else {
-    // Ensure all stages have defaults
+        // Ensure all stages have defaults
         for (const stage of ['score', 'rewrite', 'analyze'] as const) {
             if (!settings.stageDefaults[stage]) {
                 settings.stageDefaults[stage] = structuredClone(DEFAULT_STAGE_DEFAULTS[stage]);
@@ -1079,6 +1224,20 @@ export function updateSystemPrompt(prompt: string): void {
  */
 export function resetSystemPrompt(): void {
     updateSetting('systemPrompt', DEFAULT_SYSTEM_PROMPT);
+}
+
+/**
+ * Update refinement prompt
+ */
+export function updateRefinementPrompt(prompt: string): void {
+    updateSetting('refinementPrompt', prompt);
+}
+
+/**
+ * Reset refinement prompt to default
+ */
+export function resetRefinementPrompt(): void {
+    updateSetting('refinementPrompt', DEFAULT_REFINEMENT_PROMPT);
 }
 
 /**
@@ -1633,7 +1792,7 @@ export function prepareForSearch(chars: Character[]): Array<{ char: Character; i
 ```ts
 // src/generator.ts
 //
-// Handles LLM generation for pipeline stages.
+// Handles LLM generation for pipeline stages and refinement.
 // Supports both ST's current settings and custom API configuration.
 
 import { getSettings } from './settings';
@@ -1644,7 +1803,7 @@ import type {
     PipelineState,
     StageName,
 } from './types';
-import { buildStagePrompt, getStageSchema } from './pipeline';
+import { buildStagePrompt, buildRefinementPrompt, getStageSchema } from './pipeline';
 
 // ============================================================================
 // API STATUS
@@ -1737,20 +1896,96 @@ export async function runStageGeneration(
         promptLength: processedPrompt.length,
     });
 
+    return await executeGeneration(
+        settings.systemPrompt,
+        processedPrompt,
+        jsonSchema,
+        signal,
+        settings.useCurrentSettings,
+    );
+}
+
+/**
+ * Run refinement generation
+ */
+export async function runRefinementGeneration(
+    state: PipelineState,
+    signal?: AbortSignal,
+): Promise<GenerationResult> {
+    const context = SillyTavern.getContext();
+    const settings = getSettings();
+
+    // Pre-flight checks
+    if (signal?.aborted) {
+        return { success: false, error: 'Generation cancelled' };
+    }
+
+    if (!state.character) {
+        return { success: false, error: 'No character selected' };
+    }
+
+    if (!state.results.rewrite || !state.results.analyze) {
+        return { success: false, error: 'Refinement requires both rewrite and analyze results' };
+    }
+
+    if (!isApiReady()) {
+        debugLog('error', 'API not ready', { onlineStatus: context.onlineStatus });
+        return { success: false, error: 'API is not connected. Check your connection settings.' };
+    }
+
+    // Build refinement prompt
+    const userPrompt = buildRefinementPrompt(state);
+    if (!userPrompt) {
+        return { success: false, error: 'Failed to build refinement prompt' };
+    }
+
+    // Substitute character placeholders
+    const processedPrompt = substituteCharacterPlaceholders(
+        userPrompt,
+        state.character.name,
+        context.name1 || 'User',
+    );
+
+    debugLog('info', 'Starting refinement generation', {
+        iteration: state.iterationCount + 1,
+        character: state.character.name,
+        promptLength: processedPrompt.length,
+    });
+
+    // Refinement doesn't use structured output - we want free-form character card
+    return await executeGeneration(
+        settings.systemPrompt,
+        processedPrompt,
+        null,
+        signal,
+        settings.useCurrentSettings,
+    );
+}
+
+/**
+ * Core generation execution
+ */
+async function executeGeneration(
+    systemPrompt: string,
+    userPrompt: string,
+    jsonSchema: StructuredOutputSchema | null,
+    signal: AbortSignal | undefined,
+    useCurrentSettings: boolean,
+): Promise<GenerationResult> {
     try {
         let response: string;
 
-        if (settings.useCurrentSettings) {
+        if (useCurrentSettings) {
             response = await generateWithCurrentSettings(
-                settings.systemPrompt,
-                processedPrompt,
+                systemPrompt,
+                userPrompt,
                 jsonSchema,
                 signal,
             );
         } else {
             response = await generateWithCustomSettings(
-                settings.systemPrompt,
-                processedPrompt,
+                systemPrompt,
+                userPrompt,
                 jsonSchema,
                 signal,
             );
@@ -1766,8 +2001,7 @@ export async function runStageGeneration(
             return { success: false, error: 'Empty response from API' };
         }
 
-        debugLog('info', 'Stage generation complete', {
-            stage,
+        debugLog('info', 'Generation complete', {
             responseLength: response.length,
             isStructured: !!jsonSchema,
         });
@@ -1778,7 +2012,7 @@ export async function runStageGeneration(
             isStructured: !!jsonSchema,
         };
     } catch (err) {
-    // Handle abort errors gracefully
+        // Handle abort errors gracefully
         if ((err as Error).name === 'AbortError' || signal?.aborted) {
             debugLog('info', 'Generation aborted', null);
             return { success: false, error: 'Generation cancelled' };
@@ -2010,6 +2244,36 @@ export async function getStageTokenCount(
         };
     } catch (e) {
         debugLog('error', 'Token count failed', e);
+        return null;
+    }
+}
+
+/**
+ * Get token count for refinement prompt
+ */
+export async function getRefinementTokenCount(
+    state: PipelineState,
+): Promise<{ promptTokens: number; contextSize: number; percentage: number } | null> {
+    const { getTokenCountAsync, maxContext } = SillyTavern.getContext();
+    const settings = getSettings();
+
+    if (!state.character || !state.results.rewrite || !state.results.analyze) return null;
+
+    try {
+        const prompt = buildRefinementPrompt(state);
+        if (!prompt) return null;
+
+        const fullPrompt = settings.systemPrompt + '\n\n' + prompt;
+        const promptTokens = await getTokenCountAsync(fullPrompt);
+        const percentage = Math.round((promptTokens / maxContext) * 100);
+
+        return {
+            promptTokens,
+            contextSize: maxContext,
+            percentage,
+        };
+    } catch (e) {
+        debugLog('error', 'Refinement token count failed', e);
         return null;
     }
 }
@@ -3162,7 +3426,7 @@ export function exportDebugInfo(): string {
 // src/pipeline.ts
 //
 // Pipeline state machine for managing the character analysis workflow.
-// Handles stage progression, state transitions, and result management.
+// Handles stage progression, state transitions, result management, and iteration.
 
 import type {
     StageName,
@@ -3173,9 +3437,12 @@ import type {
     Character,
     PopulatedField,
     StructuredOutputSchema,
+    IterationSnapshot,
+    IterationVerdict,
 } from './types';
-import { STAGES, CHARACTER_FIELDS } from './constants';
+import { STAGES, CHARACTER_FIELDS, MAX_ITERATION_HISTORY } from './constants';
 import { createStageConfigFromDefaults, resolvePrompt, resolveSchema, processPromptTemplate } from './presets';
+import { getSettings } from './settings';
 import { debugLog } from './debug';
 
 // ============================================================================
@@ -3209,6 +3476,11 @@ export function createPipelineState(): PipelineState {
             rewrite: 'pending',
             analyze: 'pending',
         },
+
+        // Iteration system
+        iterationCount: 0,
+        iterationHistory: [],
+        isRefining: false,
 
         exportData: null,
     };
@@ -3258,6 +3530,10 @@ export function setCharacter(state: PipelineState, character: Character | null, 
             analyze: 'pending',
         },
         currentStage: null,
+        // Reset iteration state
+        iterationCount: 0,
+        iterationHistory: [],
+        isRefining: false,
         exportData: null,
     };
 
@@ -3389,6 +3665,25 @@ export function canRunStage(state: PipelineState, stage: StageName): { canRun: b
     }
 }
 
+/**
+ * Check if refinement can be run
+ */
+export function canRefine(state: PipelineState): { canRun: boolean; reason?: string } {
+    if (!state.character) {
+        return { canRun: false, reason: 'No character selected' };
+    }
+
+    if (!state.results.rewrite) {
+        return { canRun: false, reason: 'No rewrite to refine' };
+    }
+
+    if (!state.results.analyze) {
+        return { canRun: false, reason: 'Run analyze first to identify issues' };
+    }
+
+    return { canRun: true };
+}
+
 // ============================================================================
 // STAGE CONFIG MANAGEMENT
 // ============================================================================
@@ -3466,6 +3761,9 @@ export function completeStage(
         isStructured: result.isStructured,
     });
 
+    // If this is analyze completing, we're now in refinement mode
+    const isRefining = stage === 'analyze' && state.results.rewrite !== null;
+
     return {
         ...state,
         currentStage: null,
@@ -3477,6 +3775,7 @@ export function completeStage(
             ...state.results,
             [stage]: stageResult,
         },
+        isRefining,
     };
 }
 
@@ -3573,6 +3872,210 @@ export function clearStageResult(state: PipelineState, stage: StageName): Pipeli
 }
 
 // ============================================================================
+// ITERATION SYSTEM
+// ============================================================================
+
+/**
+ * Extract verdict from analysis response
+ */
+export function extractVerdict(analysisResponse: string): IterationVerdict {
+    const upper = analysisResponse.toUpperCase();
+
+    // Check for explicit verdict markers
+    if (upper.includes('VERDICT') || upper.includes('"VERDICT"')) {
+        if (upper.includes('ACCEPT') && !upper.includes('NEEDS')) {
+            return 'accept';
+        }
+        if (upper.includes('REGRESSION')) {
+            return 'regression';
+        }
+        if (upper.includes('NEEDS_REFINEMENT') || upper.includes('NEEDS REFINEMENT')) {
+            return 'needs_refinement';
+        }
+    }
+
+    // Fallback heuristics
+    if (upper.includes('READY TO USE') || upper.includes('NO MORE ITERATIONS')) {
+        return 'accept';
+    }
+    if (upper.includes('WORSE THAN') || upper.includes('STEP BACKWARD') || upper.includes('LOST MORE')) {
+        return 'regression';
+    }
+
+    // Default to needs refinement if we have any issues mentioned
+    if (upper.includes('ISSUE') || upper.includes('PROBLEM') || upper.includes('SHOULD FIX')) {
+        return 'needs_refinement';
+    }
+
+    return 'needs_refinement';
+}
+
+/**
+ * Create a snapshot of the current iteration before refining
+ */
+export function createIterationSnapshot(state: PipelineState): IterationSnapshot | null {
+    if (!state.results.rewrite || !state.results.analyze) {
+        return null;
+    }
+
+    const verdict = extractVerdict(state.results.analyze.response);
+
+    return {
+        iteration: state.iterationCount,
+        rewriteResponse: state.results.rewrite.response,
+        rewritePreview: state.results.rewrite.response.substring(0, 200),
+        analysisResponse: state.results.analyze.response,
+        analysisPreview: state.results.analyze.response.substring(0, 200),
+        verdict,
+        timestamp: Date.now(),
+    };
+}
+
+/**
+ * Start a refinement iteration
+ * - Snapshots current state
+ * - Clears analyze result
+ * - Increments iteration count
+ */
+export function startRefinement(state: PipelineState): PipelineState {
+    const snapshot = createIterationSnapshot(state);
+
+    if (!snapshot) {
+        debugLog('error', 'Cannot start refinement - missing rewrite or analyze', null);
+        return state;
+    }
+
+    // Add snapshot to history, trim if needed
+    const newHistory = [...state.iterationHistory, snapshot];
+    if (newHistory.length > MAX_ITERATION_HISTORY) {
+        newHistory.shift();
+    }
+
+    debugLog('state', 'Starting refinement iteration', {
+        iteration: state.iterationCount + 1,
+        previousVerdict: snapshot.verdict,
+    });
+
+    return {
+        ...state,
+        iterationHistory: newHistory,
+        iterationCount: state.iterationCount + 1,
+        // Clear analyze so user must re-analyze after refinement
+        results: {
+            ...state.results,
+            analyze: null,
+        },
+        stageStatus: {
+            ...state.stageStatus,
+            analyze: 'pending',
+        },
+        isRefining: true,
+    };
+}
+
+/**
+ * Complete a refinement (new rewrite generated)
+ * The refinement result replaces the current rewrite
+ */
+export function completeRefinement(
+    state: PipelineState,
+    refinedRewrite: Omit<StageResult, 'timestamp' | 'locked'>,
+): PipelineState {
+    const stageResult: StageResult = {
+        ...refinedRewrite,
+        timestamp: Date.now(),
+        locked: false,
+    };
+
+    debugLog('state', 'Refinement completed', {
+        iteration: state.iterationCount,
+        responseLength: refinedRewrite.response.length,
+    });
+
+    return {
+        ...state,
+        currentStage: null,
+        results: {
+            ...state.results,
+            rewrite: stageResult,
+            // analyze stays null - user must run it
+        },
+        stageStatus: {
+            ...state.stageStatus,
+            rewrite: 'complete',
+            analyze: 'pending',
+        },
+    };
+}
+
+/**
+ * Revert to a previous iteration
+ */
+export function revertToIteration(state: PipelineState, iterationIndex: number): PipelineState {
+    if (iterationIndex < 0 || iterationIndex >= state.iterationHistory.length) {
+        debugLog('error', 'Invalid iteration index', { iterationIndex, historyLength: state.iterationHistory.length });
+        return state;
+    }
+
+    const snapshot = state.iterationHistory[iterationIndex];
+
+    debugLog('state', 'Reverting to iteration', { iteration: snapshot.iteration });
+
+    // Restore the rewrite from that iteration
+    const restoredRewrite: StageResult = {
+        response: snapshot.rewriteResponse,
+        isStructured: false,
+        promptUsed: '[Restored from iteration history]',
+        schemaUsed: null,
+        timestamp: Date.now(),
+        locked: false,
+    };
+
+    // Trim history to that point
+    const trimmedHistory = state.iterationHistory.slice(0, iterationIndex);
+
+    return {
+        ...state,
+        results: {
+            ...state.results,
+            rewrite: restoredRewrite,
+            analyze: null,
+        },
+        stageStatus: {
+            ...state.stageStatus,
+            rewrite: 'complete',
+            analyze: 'pending',
+        },
+        iterationCount: snapshot.iteration,
+        iterationHistory: trimmedHistory,
+        isRefining: true,
+    };
+}
+
+/**
+ * Accept current rewrite as final (exit refinement loop)
+ */
+export function acceptRewrite(state: PipelineState): PipelineState {
+    if (!state.results.rewrite) {
+        return state;
+    }
+
+    debugLog('state', 'Rewrite accepted as final', { iteration: state.iterationCount });
+
+    return {
+        ...state,
+        results: {
+            ...state.results,
+            rewrite: {
+                ...state.results.rewrite,
+                locked: true,
+            },
+        },
+        isRefining: false,
+    };
+}
+
+// ============================================================================
 // PIPELINE NAVIGATION
 // ============================================================================
 
@@ -3635,14 +4138,6 @@ export function canExport(state: PipelineState): boolean {
 
 /**
  * Build the complete prompt for a stage, including template substitution.
- *
- * Data flow:
- * - Score: Gets character data only
- * - Rewrite: Gets character + score results (if available)
- * - Analyze: Gets original character + rewrite results + score results (if available)
- *
- * If the prompt uses {{placeholders}}, they get substituted.
- * If not, data is automatically prepended in a structured format.
  */
 export function buildStagePrompt(state: PipelineState, stage: StageName): string | null {
     if (!state.character) {
@@ -3666,6 +4161,9 @@ export function buildStagePrompt(state: PipelineState, stage: StageName): string
         originalCharacter: characterSummary,
         scoreResults: state.results.score?.response || '',
         rewriteResults: state.results.rewrite?.response || '',
+        currentRewrite: state.results.rewrite?.response || '',
+        currentAnalysis: state.results.analyze?.response || '',
+        iterationNumber: String(state.iterationCount + 1),
         charName: state.character.name,
         userName: name1 || 'User',
     };
@@ -3692,6 +4190,34 @@ export function buildStagePrompt(state: PipelineState, stage: StageName): string
         usesScorePlaceholder,
         usesRewritePlaceholder,
     });
+}
+
+/**
+ * Build the refinement prompt
+ */
+export function buildRefinementPrompt(state: PipelineState): string | null {
+    if (!state.character || !state.results.rewrite || !state.results.analyze) {
+        return null;
+    }
+
+    const settings = getSettings();
+    const basePrompt = settings.refinementPrompt;
+
+    const characterSummary = buildCharacterSummary(state.character);
+    const { name1 } = SillyTavern.getContext();
+
+    const context = {
+        originalCharacter: characterSummary,
+        scoreResults: state.results.score?.response || '',
+        rewriteResults: state.results.rewrite.response,
+        currentRewrite: state.results.rewrite.response,
+        currentAnalysis: state.results.analyze.response,
+        iterationNumber: String(state.iterationCount + 1),
+        charName: state.character.name,
+        userName: name1 || 'User',
+    };
+
+    return processPromptTemplate(basePrompt, context);
 }
 
 /**
@@ -3799,14 +4325,11 @@ export function generateExportData(state: PipelineState): string | null {
 
     const rewriteResponse = state.results.rewrite.response;
 
-    // Try to extract character card format from response
-    // The rewrite prompt asks for complete character card output
-    // We'll wrap it nicely for copying
-
     const exportLines = [
         `# ${state.character.name} (Rewritten)`,
         '',
         `Generated: ${new Date().toLocaleString()}`,
+        `Iterations: ${state.iterationCount}`,
         '',
         '---',
         '',
@@ -3819,7 +4342,7 @@ export function generateExportData(state: PipelineState): string | null {
             '',
             '---',
             '',
-            '## Analysis Notes',
+            '## Final Analysis',
             '',
             state.results.analyze.response,
         );
@@ -3835,6 +4358,25 @@ export function generateExportData(state: PipelineState): string | null {
             '',
             state.results.score.response,
         );
+    }
+
+    // Include iteration history summary if we have any
+    if (state.iterationHistory.length > 0) {
+        exportLines.push(
+            '',
+            '---',
+            '',
+            '## Iteration History',
+            '',
+        );
+
+        for (const snap of state.iterationHistory) {
+            exportLines.push(
+                `### Iteration ${snap.iteration + 1} - ${snap.verdict.toUpperCase()}`,
+                `${new Date(snap.timestamp).toLocaleString()}`,
+                '',
+            );
+        }
     }
 
     return exportLines.join('\n');
@@ -3869,9 +4411,16 @@ export function getPipelineSummary(state: PipelineState): {
   currentStage: StageName | null;
   canExport: boolean;
   isComplete: boolean;
+  iterationCount: number;
+  isRefining: boolean;
+  lastVerdict: IterationVerdict | null;
 } {
     const completedStages = STAGES.filter(s => state.stageStatus[s] === 'complete');
     const lockedStages = STAGES.filter(s => state.results[s]?.locked);
+
+    const lastSnapshot = state.iterationHistory.length > 0
+        ? state.iterationHistory[state.iterationHistory.length - 1]
+        : null;
 
     return {
         hasCharacter: !!state.character,
@@ -3883,6 +4432,9 @@ export function getPipelineSummary(state: PipelineState): {
         currentStage: state.currentStage,
         canExport: canExport(state),
         isComplete: isPipelineComplete(state),
+        iterationCount: state.iterationCount,
+        isRefining: state.isRefining,
+        lastVerdict: lastSnapshot?.verdict || null,
     };
 }
 
@@ -3966,6 +4518,51 @@ export function validatePipeline(state: PipelineState): PipelineValidation {
     };
 }
 
+/**
+ * Validate refinement before running
+ */
+export function validateRefinement(state: PipelineState): PipelineValidation {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    if (!state.character) {
+        errors.push('No character selected');
+    }
+
+    if (!state.results.rewrite) {
+        errors.push('No rewrite to refine');
+    }
+
+    if (!state.results.analyze) {
+        errors.push('Run analyze first to identify issues');
+    }
+
+    // Check API readiness
+    const { onlineStatus } = SillyTavern.getContext();
+    if (onlineStatus !== 'Valid' && onlineStatus !== 'Connected') {
+        errors.push('API is not connected');
+    }
+
+    // Warn if last verdict was accept
+    const lastSnapshot = state.iterationHistory.length > 0
+        ? state.iterationHistory[state.iterationHistory.length - 1]
+        : null;
+
+    if (lastSnapshot?.verdict === 'accept') {
+        warnings.push('Last analysis suggested accepting the rewrite');
+    }
+
+    if (state.iterationCount >= 5) {
+        warnings.push(`Already at iteration ${state.iterationCount + 1} - consider accepting or starting fresh`);
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        warnings,
+    };
+}
+
 // ============================================================================
 // SERIALIZATION (for potential future persistence)
 // ============================================================================
@@ -3980,8 +4577,11 @@ export function serializePipelineState(state: PipelineState): Record<string, unk
         configs: state.configs,
         selectedStages: state.selectedStages,
         stageStatus: state.stageStatus,
+        iterationCount: state.iterationCount,
+        iterationHistory: state.iterationHistory,
+        isRefining: state.isRefining,
         exportData: state.exportData,
-    // Don't serialize character - will be re-fetched by index
+        // Don't serialize character - will be re-fetched by index
     };
 }
 
@@ -4004,6 +4604,9 @@ export function deserializePipelineState(
             selectedStages: data.selectedStages as StageName[],
             currentStage: null,  // Always reset to null on restore
             stageStatus: data.stageStatus as Record<StageName, StageStatus>,
+            iterationCount: (data.iterationCount as number) || 0,
+            iterationHistory: (data.iterationHistory as IterationSnapshot[]) || [],
+            isRefining: (data.isRefining as boolean) || false,
             exportData: data.exportData as string | null,
         };
     } catch (e) {
@@ -4129,6 +4732,9 @@ export interface TemplateContext {
   originalCharacter?: string;
   scoreResults?: string;
   rewriteResults?: string;
+  currentRewrite?: string;
+  currentAnalysis?: string;
+  iterationNumber?: string;
   charName?: string;
   userName?: string;
 }
@@ -4141,12 +4747,15 @@ export interface TemplateContext {
  * 2. Replace our custom placeholders ({{original_character}}, {{score_results}}, etc.)
  * 3. Replace {{char}} and {{user}} with our specific character/user names
  *    (This overrides ST's substitution which uses the active chat character)
+ * 4. Handle conditional blocks {{#if score_results}}...{{/if}}
  */
 export function processPromptTemplate(prompt: string, context: TemplateContext): string {
     // First, run ST's macro substitution for standard macros
-    // This handles things like {{time}}, {{date}}, {{random}}, etc.
     const { substituteParams } = SillyTavern.getContext();
     let processed = substituteParams(prompt);
+
+    // Handle conditional blocks first
+    processed = processConditionalBlocks(processed, context);
 
     // Now replace our custom placeholders
     if (context.originalCharacter !== undefined) {
@@ -4170,6 +4779,27 @@ export function processPromptTemplate(prompt: string, context: TemplateContext):
         );
     }
 
+    if (context.currentRewrite !== undefined) {
+        processed = processed.replace(
+            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.CURRENT_REWRITE), 'gi'),
+            context.currentRewrite,
+        );
+    }
+
+    if (context.currentAnalysis !== undefined) {
+        processed = processed.replace(
+            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.CURRENT_ANALYSIS), 'gi'),
+            context.currentAnalysis,
+        );
+    }
+
+    if (context.iterationNumber !== undefined) {
+        processed = processed.replace(
+            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.ITERATION_NUMBER), 'gi'),
+            context.iterationNumber,
+        );
+    }
+
     // Replace {{char_name}} with our specific character
     if (context.charName !== undefined) {
         processed = processed.replace(
@@ -4187,8 +4817,6 @@ export function processPromptTemplate(prompt: string, context: TemplateContext):
     }
 
     // IMPORTANT: Also replace {{char}} and {{user}} with our specific names
-    // This overrides whatever ST's substituteParams did, because we're working
-    // with a specific character from the character list, not the active chat
     if (context.charName !== undefined) {
         processed = processed.replace(/\{\{char\}\}/gi, context.charName);
     }
@@ -4198,6 +4826,46 @@ export function processPromptTemplate(prompt: string, context: TemplateContext):
     }
 
     return processed;
+}
+
+/**
+ * Process conditional blocks like {{#if score_results}}...{{/if}}
+ */
+function processConditionalBlocks(prompt: string, context: TemplateContext): string {
+    // Match {{#if variable}}...{{/if}} blocks
+    const conditionalRegex = /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/gi;
+
+    return prompt.replace(conditionalRegex, (match, variable, content) => {
+        const varName = variable.toLowerCase();
+
+        // Check if the variable has a truthy value
+        let hasValue = false;
+
+        switch (varName) {
+            case 'score_results':
+                hasValue = !!context.scoreResults?.trim();
+                break;
+            case 'rewrite_results':
+                hasValue = !!context.rewriteResults?.trim();
+                break;
+            case 'current_rewrite':
+                hasValue = !!context.currentRewrite?.trim();
+                break;
+            case 'current_analysis':
+                hasValue = !!context.currentAnalysis?.trim();
+                break;
+            case 'original_character':
+                hasValue = !!context.originalCharacter?.trim();
+                break;
+            case 'iteration_number':
+                hasValue = !!context.iterationNumber && context.iterationNumber !== '0';
+                break;
+            default:
+                hasValue = false;
+        }
+
+        return hasValue ? content : '';
+    });
 }
 
 /**
@@ -4230,12 +4898,18 @@ export function getUnfilledPlaceholders(prompt: string, stage: StageName, hasSco
                 }
                 break;
             case 'REWRITE_RESULTS':
+            case 'CURRENT_REWRITE':
                 if (!hasRewrite && stage !== 'rewrite') {
                     unfilled.push('{{rewrite_results}} - no rewrite results available');
                 }
                 break;
+            case 'CURRENT_ANALYSIS':
+                // Only available during refinement
+                unfilled.push('{{current_analysis}} - only available during refinement');
+                break;
             // ORIGINAL_CHARACTER is always available if we have a character
             // CHAR_NAME and USER_NAME are always available
+            // ITERATION_NUMBER is always available
         }
     }
 
@@ -5031,12 +5705,18 @@ import {
     clearStageResult,
     getNextStage,
     canRunStage,
+    canRefine,
     validatePipeline,
+    validateRefinement,
     setExportData,
     buildStagePrompt,
     getStageSchema,
+    startRefinement,
+    completeRefinement,
+    acceptRewrite,
+    revertToIteration,
 } from '../pipeline';
-import { runStageGeneration, getStageTokenCount, getApiInfo } from '../generator';
+import { runStageGeneration, runRefinementGeneration, getStageTokenCount, getRefinementTokenCount, getApiInfo, isApiReady } from '../generator';
 import { renderCharacterSelect, updateCharacterSelectState, renderDropdownItems, updateFieldTokenCounts } from './components/character-select';
 import { getPopulatedFields } from '../character';
 import { renderPipelineNav, updatePipelineNavState } from './components/pipeline-nav';
@@ -5048,44 +5728,242 @@ import {
     handleValidateSchema,
     handleFixSchema,
     handleFormatSchema,
-    handleGenerateSchema,  // Add this
+    handleGenerateSchema,
 } from './components/stage-config';
-import { renderResultsPanel, updateResultsPanelState } from './components/results-panel';
+import { renderResultsPanel, updateResultsPanelState, renderRefinementLoading } from './components/results-panel';
+import { renderIterationHistory, updateIterationHistoryState, renderIterationViewContent } from './components/iteration-history';
 import { openSettingsModal } from './settings-modal';
-import type { PipelineState, StageName, Character } from '../types';
+import type { PipelineState, StageName, Character, IterationSnapshot } from '../types';
 
 // ============================================================================
 // STATE
 // ============================================================================
 
 let popupState: {
-  pipeline: PipelineState;
-  isGenerating: boolean;
-  abortController: AbortController | null;
-  activeStageView: StageName;
+    pipeline: PipelineState;
+    isGenerating: boolean;
+    isRefining: boolean;
+    abortController: AbortController | null;
+    activeStageView: StageName;
+    characters: Character[];
 } | null = null;
 
 let popupElement: HTMLElement | null = null;
 
+// ============================================================================
+// EVENT MANAGEMENT
+// ============================================================================
+
+const eventCleanup: Array<() => void> = [];
+
+function subscribeEvents(): void {
+    const { eventSource, eventTypes } = SillyTavern.getContext();
+
+    const handlers = {
+        onStatusChange: () => {
+            debugLog('info', 'API status changed', { isReady: isApiReady() });
+            updateApiStatus();
+        },
+
+        onCharEdited: () => {
+            debugLog('info', 'Character edited externally', null);
+            refreshSelectedCharacter();
+        },
+
+        onCharDeleted: (data: { id: number; character: Character }) => {
+            debugLog('info', 'Character deleted', { id: data.id });
+            handleCharacterDeleted(data.id);
+        },
+
+        onPresetChanged: () => {
+            debugLog('info', 'OAI preset changed', null);
+            if (popupState) {
+                updateTokenEstimate();
+            }
+        },
+
+        onSourceChanged: () => {
+            debugLog('info', 'Chat completion source changed', null);
+            updateApiStatus();
+            updateTokenEstimate();
+        },
+
+        onModelChanged: () => {
+            debugLog('info', 'Chat completion model changed', null);
+            updateApiStatus();
+            updateTokenEstimate();
+        },
+    };
+
+    eventSource.on(eventTypes.ONLINE_STATUS_CHANGED, handlers.onStatusChange);
+    eventSource.on(eventTypes.CHARACTER_EDITED, handlers.onCharEdited);
+    eventSource.on(eventTypes.CHARACTER_DELETED, handlers.onCharDeleted);
+    eventSource.on(eventTypes.OAI_PRESET_CHANGED_AFTER, handlers.onPresetChanged);
+    eventSource.on(eventTypes.CHATCOMPLETION_SOURCE_CHANGED, handlers.onSourceChanged);
+    eventSource.on(eventTypes.CHATCOMPLETION_MODEL_CHANGED, handlers.onModelChanged);
+
+    eventCleanup.push(
+        () => eventSource.removeListener(eventTypes.ONLINE_STATUS_CHANGED, handlers.onStatusChange),
+        () => eventSource.removeListener(eventTypes.CHARACTER_EDITED, handlers.onCharEdited),
+        () => eventSource.removeListener(eventTypes.CHARACTER_DELETED, handlers.onCharDeleted),
+        () => eventSource.removeListener(eventTypes.OAI_PRESET_CHANGED_AFTER, handlers.onPresetChanged),
+        () => eventSource.removeListener(eventTypes.CHATCOMPLETION_SOURCE_CHANGED, handlers.onSourceChanged),
+        () => eventSource.removeListener(eventTypes.CHATCOMPLETION_MODEL_CHANGED, handlers.onModelChanged),
+    );
+
+    debugLog('info', 'Event listeners subscribed', { count: eventCleanup.length });
+}
+
+function unsubscribeEvents(): void {
+    eventCleanup.forEach(fn => fn());
+    eventCleanup.length = 0;
+    debugLog('info', 'Event listeners unsubscribed', null);
+}
+
+// ============================================================================
+// EVENT HANDLERS
+// ============================================================================
+
+function updateApiStatus(): void {
+    if (!popupElement) return;
+
+    const apiInfo = getApiInfo();
+    const statusEl = popupElement.querySelector(`.${MODULE_NAME}_api_status`);
+
+    if (statusEl) {
+        statusEl.className = `${MODULE_NAME}_api_status ${apiInfo.isReady ? 'connected' : 'disconnected'}`;
+        const textSpan = statusEl.querySelector('span');
+        if (textSpan) {
+            textSpan.textContent = apiInfo.source;
+        }
+    }
+
+    updatePipelineNav();
+}
+
+function refreshSelectedCharacter(): void {
+    if (!popupState || popupState.pipeline.characterIndex === null) return;
+
+    const { characters } = SillyTavern.getContext();
+    const charList = characters as Character[];
+    const index = popupState.pipeline.characterIndex;
+
+    popupState.characters = charList;
+
+    if (index >= 0 && index < charList.length) {
+        const updatedChar = charList[index];
+
+        if (updatedChar.name === popupState.pipeline.character?.name) {
+            popupState.pipeline = {
+                ...popupState.pipeline,
+                character: updatedChar,
+            };
+            updateCharacterSelect();
+            updateTokenEstimate();
+            debugLog('info', 'Character refreshed', { name: updatedChar.name });
+        } else {
+            handleCharacterInvalidated();
+        }
+    } else {
+        handleCharacterInvalidated();
+    }
+}
+
+function handleCharacterDeleted(deletedId: number): void {
+    if (!popupState) return;
+
+    const currentIndex = popupState.pipeline.characterIndex;
+
+    if (currentIndex === null) return;
+
+    if (currentIndex === deletedId) {
+        handleCharacterInvalidated();
+        toastr.warning('Selected character was deleted');
+    } else if (currentIndex > deletedId) {
+        const newIndex = currentIndex - 1;
+        const { characters } = SillyTavern.getContext();
+        const charList = characters as Character[];
+
+        if (newIndex >= 0 && newIndex < charList.length) {
+            popupState.pipeline = {
+                ...popupState.pipeline,
+                characterIndex: newIndex,
+                character: charList[newIndex],
+            };
+            popupState.characters = charList;
+            debugLog('info', 'Character index adjusted after deletion', { oldIndex: currentIndex, newIndex });
+        } else {
+            handleCharacterInvalidated();
+        }
+    }
+}
+
+function handleCharacterInvalidated(): void {
+    if (!popupState) return;
+
+    debugLog('info', 'Character invalidated, clearing selection', null);
+
+    popupState.pipeline = setCharacter(popupState.pipeline, null, null);
+    updateAllComponents();
+    toastr.info('Character selection cleared');
+}
+
+// ============================================================================
+// GLOBAL LISTENERS
+// ============================================================================
+
 let documentClickHandler: ((e: MouseEvent) => void) | null = null;
+let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+
+function initGlobalListeners(): void {
+    keyboardHandler = (e: KeyboardEvent) => {
+        if (!popupState) return;
+
+        // Ctrl+Enter to run current stage
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            if (!popupState.isGenerating && !popupState.isRefining) {
+                runSingleStage(popupState.activeStageView);
+            }
+        }
+
+        // Escape to cancel generation
+        if (e.key === 'Escape' && (popupState.isGenerating || popupState.isRefining) && popupState.abortController) {
+            popupState.abortController.abort();
+        }
+    };
+
+    document.addEventListener('keydown', keyboardHandler);
+}
+
+function removeGlobalListeners(): void {
+    if (keyboardHandler) {
+        document.removeEventListener('keydown', keyboardHandler);
+        keyboardHandler = null;
+    }
+    if (documentClickHandler) {
+        document.removeEventListener('click', documentClickHandler);
+        documentClickHandler = null;
+    }
+}
 
 // ============================================================================
 // MAIN ENTRY
 // ============================================================================
 
-/**
- * Open the main Character Tools popup
- */
 export async function openMainPopup(): Promise<void> {
     const { Popup, POPUP_TYPE, characters } = SillyTavern.getContext();
     const { DOMPurify } = SillyTavern.libs;
 
-    // Initialize state
+    const charList = characters as Character[];
+
     popupState = {
         pipeline: createPipelineState(),
         isGenerating: false,
+        isRefining: false,
         abortController: null,
         activeStageView: 'score',
+        characters: charList,
     };
 
     const content = buildPopupContent();
@@ -5099,27 +5977,26 @@ export async function openMainPopup(): Promise<void> {
     });
 
     popup.show().then(() => {
-        // Cleanup on close
         if (popupState?.abortController) {
             popupState.abortController.abort();
         }
         popupState = null;
         popupElement = null;
+        unsubscribeEvents();
         removeGlobalListeners();
         debugLog('info', 'Popup closed', null);
     });
 
-    // Wait for DOM
     await new Promise<void>(resolve => setTimeout(resolve, 0));
 
     popupElement = document.getElementById(`${MODULE_NAME}_popup`);
 
-    // Initialize components
-    initComponents(characters as Character[]);
-    initKeyboardShortcuts();
+    subscribeEvents();
+    initGlobalListeners();
+    initComponents(charList);
     updateAllComponents();
 
-    debugLog('info', 'Popup opened', { characterCount: (characters as Character[]).length });
+    debugLog('info', 'Popup opened', { characterCount: charList.length });
 }
 
 // ============================================================================
@@ -5183,8 +6060,10 @@ function buildPopupContent(): string {
         <div class="${MODULE_NAME}_section_header">
           <i class="fa-solid fa-file-lines"></i>
           <span>Results</span>
+          <span id="${MODULE_NAME}_iteration_indicator" class="${MODULE_NAME}_iteration_indicator hidden"></span>
         </div>
         <div id="${MODULE_NAME}_results_container"></div>
+        <div id="${MODULE_NAME}_iteration_history_container"></div>
       </div>
     </div>
   `;
@@ -5239,16 +6118,25 @@ function initComponents(characters: Character[]): void {
         initResultsPanelListeners();
     }
 
+    // Iteration history
+    const historyContainer = popupElement.querySelector(`#${MODULE_NAME}_iteration_history_container`);
+    if (historyContainer) {
+        historyContainer.innerHTML = renderIterationHistory(
+            popupState.pipeline.iterationHistory,
+            popupState.pipeline.iterationCount,
+            handleRevertToIteration,
+        );
+        initIterationHistoryListeners();
+    }
+
     // Header buttons
     popupElement.querySelector(`#${MODULE_NAME}_settings_btn`)?.addEventListener('click', () => {
         openSettingsModal(() => {
-            // Refresh on settings close
             updateAllComponents();
         });
     });
 
     popupElement.querySelector(`#${MODULE_NAME}_close_btn`)?.addEventListener('click', () => {
-        // Find and close the popup
         const dialog = popupElement?.closest('.popup');
         if (dialog) {
             const cancelBtn = dialog.querySelector('.popup-button-cancel, .popup-button-ok') as HTMLElement;
@@ -5264,8 +6152,7 @@ function initComponents(characters: Character[]): void {
 function initCharacterSelectListeners(characters: Character[]): void {
     if (!popupElement) return;
 
-    const { Fuse } = SillyTavern.libs;
-    const { lodash } = SillyTavern.libs;
+    const { Fuse, lodash } = SillyTavern.libs;
 
     const container = popupElement.querySelector(`#${MODULE_NAME}_character_select_container`);
     if (!container) return;
@@ -5275,22 +6162,22 @@ function initCharacterSelectListeners(characters: Character[]): void {
 
     if (!searchInput || !dropdown) return;
 
-    // Build Fuse index
-    const charData = characters
-        .map((char, index) => ({ char, index }))
-        .filter(({ char }) => char?.name);
-
-    const fuse = new Fuse(charData, {
-        keys: ['char.name', 'char.description'],
-        threshold: 0.4,
-        includeScore: true,
-        minMatchCharLength: 1,
-    });
-
     let selectedIndex = -1;
-    let currentResults: typeof charData = [];
+    let currentResults: Array<{ char: Character; index: number }> = [];
 
     const handleSearch = () => {
+        const currentChars = popupState?.characters || characters;
+        const currentCharData = currentChars
+            .map((char, index) => ({ char, index }))
+            .filter(({ char }) => char?.name);
+
+        const fuse = new Fuse(currentCharData, {
+            keys: ['char.name', 'char.description'],
+            threshold: 0.4,
+            includeScore: true,
+            minMatchCharLength: 1,
+        });
+
         const query = searchInput.value.trim();
 
         if (!query) {
@@ -5300,7 +6187,7 @@ function initCharacterSelectListeners(characters: Character[]): void {
         }
 
         const results = fuse.search(query, { limit: 10 });
-        currentResults = results.map((r: { item: typeof charData[number] }) => r.item);
+        currentResults = results.map((r: { item: { char: Character; index: number } }) => r.item);
 
         if (currentResults.length === 0) {
             dropdown.innerHTML = `<div class="${MODULE_NAME}_dropdown_empty">No characters found</div>`;
@@ -5316,7 +6203,6 @@ function initCharacterSelectListeners(characters: Character[]): void {
     const debouncedSearch = lodash.debounce(handleSearch, 150);
     searchInput.addEventListener('input', debouncedSearch);
 
-    // Keyboard navigation
     searchInput.addEventListener('keydown', (e) => {
         if (currentResults.length === 0) return;
 
@@ -5339,7 +6225,6 @@ function initCharacterSelectListeners(characters: Character[]): void {
         }
     });
 
-    // Click outside to close dropdown
     documentClickHandler = (e: MouseEvent) => {
         if (!searchInput.contains(e.target as Node) && !dropdown.contains(e.target as Node)) {
             dropdown.classList.add('hidden');
@@ -5347,7 +6232,6 @@ function initCharacterSelectListeners(characters: Character[]): void {
     };
     document.addEventListener('click', documentClickHandler);
 
-    // Dropdown click
     dropdown.addEventListener('click', (e) => {
         const item = (e.target as HTMLElement).closest(`.${MODULE_NAME}_dropdown_item`);
         if (item) {
@@ -5361,11 +6245,9 @@ function initCharacterSelectListeners(characters: Character[]): void {
         }
     });
 
-    // Event delegation for dynamically created elements
     container.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
 
-        // Clear button
         if (target.closest(`#${MODULE_NAME}_char_clear`)) {
             if (!popupState) return;
             popupState.pipeline = setCharacter(popupState.pipeline, null, null);
@@ -5373,7 +6255,6 @@ function initCharacterSelectListeners(characters: Character[]): void {
             return;
         }
 
-        // Field expansion toggles
         const toggle = target.closest(`.${MODULE_NAME}_field_toggle`);
         if (toggle) {
             const fieldKey = toggle.getAttribute('data-field');
@@ -5389,14 +6270,12 @@ function initCharacterSelectListeners(characters: Character[]): void {
     });
 }
 
-
 function selectCharacter(char: Character, index: number): void {
     if (!popupState) return;
 
     popupState.pipeline = setCharacter(popupState.pipeline, char, index);
     updateAllComponents();
 
-    // Update field token counts after a short delay (let DOM settle)
     setTimeout(async () => {
         if (!popupElement || !popupState?.pipeline.character) return;
 
@@ -5420,7 +6299,6 @@ function initPipelineNavListeners(): void {
     const container = popupElement.querySelector(`#${MODULE_NAME}_pipeline_nav_container`);
     if (!container) return;
 
-    // Stage toggle checkboxes
     container.addEventListener('change', (e) => {
         const checkbox = e.target as HTMLInputElement;
         if (checkbox.classList.contains(`${MODULE_NAME}_stage_checkbox`)) {
@@ -5432,7 +6310,6 @@ function initPipelineNavListeners(): void {
         }
     });
 
-    // Stage view buttons
     container.addEventListener('click', (e) => {
         const btn = (e.target as HTMLElement).closest(`.${MODULE_NAME}_stage_btn`);
         if (btn && popupState) {
@@ -5446,7 +6323,6 @@ function initPipelineNavListeners(): void {
             }
         }
 
-        // Run buttons
         const runBtn = (e.target as HTMLElement).closest(`#${MODULE_NAME}_run_selected_btn`);
         if (runBtn) {
             runSelectedStages();
@@ -5475,7 +6351,6 @@ function initStageConfigListeners(): void {
     const container = popupElement.querySelector(`#${MODULE_NAME}_stage_config_container`);
     if (!container) return;
 
-    // Prompt preset select
     container.addEventListener('change', (e) => {
         const select = e.target as HTMLSelectElement;
 
@@ -5497,7 +6372,6 @@ function initStageConfigListeners(): void {
         }
     });
 
-    // Custom prompt textarea
     const { lodash } = SillyTavern.libs;
     container.addEventListener('input', lodash.debounce((e: Event) => {
         const textarea = e.target as HTMLTextAreaElement;
@@ -5520,7 +6394,6 @@ function initStageConfigListeners(): void {
         }
     }, 300));
 
-    // Structured output toggle
     container.addEventListener('change', (e) => {
         const checkbox = e.target as HTMLInputElement;
         if (checkbox.id === `${MODULE_NAME}_use_structured` && popupState) {
@@ -5531,18 +6404,15 @@ function initStageConfigListeners(): void {
         }
     });
 
-    // Click handlers for buttons
     container.addEventListener('click', async (e) => {
         const target = e.target as HTMLElement;
 
-        // Run stage button
         const runBtn = target.closest(`#${MODULE_NAME}_run_stage_btn`);
         if (runBtn && popupState) {
             runSingleStage(popupState.activeStageView);
             return;
         }
 
-        // Save prompt preset button
         const savePromptBtn = target.closest(`#${MODULE_NAME}_save_prompt_preset_btn`);
         if (savePromptBtn && popupState) {
             const promptTextarea = popupElement?.querySelector(`#${MODULE_NAME}_custom_prompt`) as HTMLTextAreaElement;
@@ -5559,7 +6429,6 @@ function initStageConfigListeners(): void {
             return;
         }
 
-        // Save schema preset button
         const saveSchemaBtn = target.closest(`#${MODULE_NAME}_save_schema_preset_btn`);
         if (saveSchemaBtn && popupState) {
             const schemaTextarea = popupElement?.querySelector(`#${MODULE_NAME}_custom_schema`) as HTMLTextAreaElement;
@@ -5576,7 +6445,6 @@ function initStageConfigListeners(): void {
             return;
         }
 
-        // Generate schema button
         const generateBtn = target.closest(`#${MODULE_NAME}_generate_schema_btn`);
         if (generateBtn && popupState) {
             const generated = await handleGenerateSchema();
@@ -5594,7 +6462,6 @@ function initStageConfigListeners(): void {
             return;
         }
 
-        // Validate schema button
         const validateBtn = target.closest(`#${MODULE_NAME}_validate_schema_btn`);
         if (validateBtn && popupState) {
             const schemaTextarea = popupElement?.querySelector(`#${MODULE_NAME}_custom_schema`) as HTMLTextAreaElement;
@@ -5604,7 +6471,6 @@ function initStageConfigListeners(): void {
             return;
         }
 
-        // Fix schema button
         const fixBtn = target.closest(`#${MODULE_NAME}_fix_schema_btn`);
         if (fixBtn && popupState) {
             const schemaTextarea = popupElement?.querySelector(`#${MODULE_NAME}_custom_schema`) as HTMLTextAreaElement;
@@ -5622,7 +6488,6 @@ function initStageConfigListeners(): void {
             return;
         }
 
-        // Format schema button
         const formatBtn = target.closest(`#${MODULE_NAME}_format_schema_btn`);
         if (formatBtn && popupState) {
             const schemaTextarea = popupElement?.querySelector(`#${MODULE_NAME}_custom_schema`) as HTMLTextAreaElement;
@@ -5641,7 +6506,6 @@ function initStageConfigListeners(): void {
         }
     });
 }
-
 
 // ============================================================================
 // RESULTS PANEL LISTENERS
@@ -5684,6 +6548,18 @@ function initResultsPanelListeners(): void {
             }
         }
 
+        // Refine
+        if (target.closest(`#${MODULE_NAME}_refine_btn`) && popupState) {
+            runRefinement();
+        }
+
+        // Accept rewrite
+        if (target.closest(`#${MODULE_NAME}_accept_btn`) && popupState) {
+            popupState.pipeline = acceptRewrite(popupState.pipeline);
+            toastr.success('Rewrite accepted as final');
+            updateAllComponents();
+        }
+
         // Copy
         if (target.closest(`#${MODULE_NAME}_copy_btn`) && popupState) {
             const result = popupState.pipeline.results[popupState.activeStageView];
@@ -5710,11 +6586,83 @@ function initResultsPanelListeners(): void {
 }
 
 // ============================================================================
+// ITERATION HISTORY LISTENERS
+// ============================================================================
+
+function initIterationHistoryListeners(): void {
+    if (!popupElement || !popupState) return;
+
+    const container = popupElement.querySelector(`#${MODULE_NAME}_iteration_history_container`);
+    if (!container) return;
+
+    container.addEventListener('click', async (e) => {
+        const target = e.target as HTMLElement;
+
+        // Revert button
+        const revertBtn = target.closest(`.${MODULE_NAME}_iteration_revert_btn`);
+        if (revertBtn && popupState) {
+            const index = parseInt(revertBtn.getAttribute('data-index') || '-1', 10);
+            if (index >= 0) {
+                await handleRevertToIteration(index);
+            }
+        }
+
+        // View button
+        const viewBtn = target.closest(`.${MODULE_NAME}_iteration_view_btn`);
+        if (viewBtn && popupState) {
+            const index = parseInt(viewBtn.getAttribute('data-index') || '-1', 10);
+            if (index >= 0 && index < popupState.pipeline.iterationHistory.length) {
+                showIterationView(popupState.pipeline.iterationHistory[index]);
+            }
+        }
+    });
+}
+
+async function handleRevertToIteration(index: number): Promise<void> {
+    if (!popupState) return;
+
+    const { Popup, POPUP_RESULT } = SillyTavern.getContext();
+
+    const confirmed = await Popup.show.confirm(
+        'Revert to Previous Iteration?',
+        `This will restore the rewrite from iteration #${index + 1} and discard later changes.`,
+    );
+
+    if (confirmed !== POPUP_RESULT.AFFIRMATIVE) return;
+
+    popupState.pipeline = revertToIteration(popupState.pipeline, index);
+    toastr.info(`Reverted to iteration #${index + 1}`);
+    updateAllComponents();
+}
+
+async function showIterationView(snap: IterationSnapshot): Promise<void> {
+    const { Popup, POPUP_TYPE } = SillyTavern.getContext();
+    const { DOMPurify } = SillyTavern.libs;
+
+    const content = renderIterationViewContent(snap);
+
+    const popup = new Popup(DOMPurify.sanitize(content), POPUP_TYPE.TEXT, '', {
+        wide: true,
+        large: true,
+        allowVerticalScrolling: true,
+        okButton: 'Close',
+        cancelButton: false,
+    });
+
+    await popup.show();
+}
+
+// ============================================================================
 // GENERATION
 // ============================================================================
 
 async function runSingleStage(stage: StageName): Promise<void> {
-    if (!popupState || popupState.isGenerating) return;
+    if (!popupState || popupState.isGenerating || popupState.isRefining) return;
+
+    if (!isApiReady()) {
+        toastr.error('API is not connected');
+        return;
+    }
 
     const canRun = canRunStage(popupState.pipeline, stage);
     if (!canRun.canRun) {
@@ -5731,7 +6679,6 @@ async function runSingleStage(stage: StageName): Promise<void> {
     popupState.pipeline = startStage(popupState.pipeline, stage);
     updateAllComponents();
 
-    // Capture the prompt and schema BEFORE generation
     const promptUsed = buildStagePrompt(popupState.pipeline, stage) || '';
     const schemaUsed = getStageSchema(popupState.pipeline, stage);
 
@@ -5767,7 +6714,12 @@ async function runSingleStage(stage: StageName): Promise<void> {
 }
 
 async function runSelectedStages(): Promise<void> {
-    if (!popupState || popupState.isGenerating) return;
+    if (!popupState || popupState.isGenerating || popupState.isRefining) return;
+
+    if (!isApiReady()) {
+        toastr.error('API is not connected');
+        return;
+    }
 
     const validation = validatePipeline(popupState.pipeline);
     if (!validation.valid) {
@@ -5782,7 +6734,7 @@ async function runSelectedStages(): Promise<void> {
     for (const stage of popupState.pipeline.selectedStages) {
         const status = popupState.pipeline.stageStatus[stage];
         if (status === 'complete' || status === 'skipped') {
-            continue; // Skip already complete/skipped stages
+            continue;
         }
 
         popupState.activeStageView = stage;
@@ -5790,7 +6742,6 @@ async function runSelectedStages(): Promise<void> {
 
         await runSingleStage(stage);
 
-        // Stop if generation was cancelled or failed
         if (!popupState) break;
 
         const newStatus = popupState.pipeline.stageStatus[stage];
@@ -5803,11 +6754,80 @@ async function runSelectedStages(): Promise<void> {
 async function runAllStages(): Promise<void> {
     if (!popupState) return;
 
-    // Select all stages first
     popupState.pipeline.selectedStages = [...STAGES];
     updatePipelineNav();
 
     await runSelectedStages();
+}
+
+async function runRefinement(): Promise<void> {
+    if (!popupState || popupState.isGenerating || popupState.isRefining) return;
+
+    if (!isApiReady()) {
+        toastr.error('API is not connected');
+        return;
+    }
+
+    const canRefineResult = canRefine(popupState.pipeline);
+    if (!canRefineResult.canRun) {
+        toastr.warning(canRefineResult.reason || 'Cannot refine');
+        return;
+    }
+
+    const validation = validateRefinement(popupState.pipeline);
+    if (!validation.valid) {
+        toastr.error(validation.errors.join('\n'));
+        return;
+    }
+
+    if (validation.warnings.length > 0) {
+        toastr.warning(validation.warnings.join('\n'));
+    }
+
+    // Start refinement - this snapshots current state
+    popupState.pipeline = startRefinement(popupState.pipeline);
+    popupState.isRefining = true;
+    popupState.abortController = new AbortController();
+
+    // Show refinement loading state
+    const resultsContainer = popupElement?.querySelector(`#${MODULE_NAME}_results_container`);
+    if (resultsContainer) {
+        resultsContainer.innerHTML = renderRefinementLoading(popupState.pipeline.iterationCount);
+    }
+
+    updateIterationIndicator();
+    updateIterationHistory();
+
+    try {
+        const result = await runRefinementGeneration(
+            popupState.pipeline,
+            popupState.abortController.signal,
+        );
+
+        if (result.success) {
+            popupState.pipeline = completeRefinement(popupState.pipeline, {
+                response: result.response,
+                isStructured: false,
+                promptUsed: '[Refinement prompt]',
+                schemaUsed: null,
+            });
+
+            toastr.success(`Refinement #${popupState.pipeline.iterationCount} complete`);
+
+            // Switch to analyze view so user can review
+            popupState.activeStageView = 'analyze';
+        } else {
+            if (result.error !== 'Generation cancelled') {
+                toastr.error(result.error);
+            }
+        }
+    } catch (e) {
+        toastr.error((e as Error).message);
+    } finally {
+        popupState.isRefining = false;
+        popupState.abortController = null;
+        updateAllComponents();
+    }
 }
 
 // ============================================================================
@@ -5820,6 +6840,8 @@ function updateAllComponents(): void {
     updateStageSection();
     updateResultsPanel();
     updateTokenEstimate();
+    updateIterationIndicator();
+    updateIterationHistory();
 }
 
 function updateCharacterSelect(): void {
@@ -5845,8 +6867,8 @@ function updatePipelineNav(): void {
             popupState.pipeline.selectedStages,
             popupState.pipeline.stageStatus,
             popupState.activeStageView,
-            !!popupState.pipeline.character,
-            popupState.isGenerating,
+            !!popupState.pipeline.character && isApiReady(),
+            popupState.isGenerating || popupState.isRefining,
         );
     }
 }
@@ -5854,7 +6876,6 @@ function updatePipelineNav(): void {
 function updateStageSection(): void {
     if (!popupElement || !popupState) return;
 
-    // Update header
     const icon = popupElement.querySelector(`#${MODULE_NAME}_stage_icon`);
     const title = popupElement.querySelector(`#${MODULE_NAME}_stage_title`);
 
@@ -5877,7 +6898,7 @@ function updateStageConfigUI(): void {
             container as HTMLElement,
             popupState.activeStageView,
             popupState.pipeline.configs[popupState.activeStageView],
-            popupState.isGenerating,
+            popupState.isGenerating || popupState.isRefining,
         );
     }
 }
@@ -5899,6 +6920,36 @@ function updateResultsPanel(): void {
     }
 }
 
+function updateIterationIndicator(): void {
+    if (!popupElement || !popupState) return;
+
+    const indicator = popupElement.querySelector(`#${MODULE_NAME}_iteration_indicator`);
+    if (!indicator) return;
+
+    if (popupState.pipeline.iterationCount > 0 || popupState.pipeline.isRefining) {
+        indicator.classList.remove('hidden');
+        indicator.innerHTML = `
+      <i class="fa-solid fa-arrows-rotate"></i>
+      Iteration #${popupState.pipeline.iterationCount + 1}
+    `;
+    } else {
+        indicator.classList.add('hidden');
+    }
+}
+
+function updateIterationHistory(): void {
+    if (!popupElement || !popupState) return;
+
+    const container = popupElement.querySelector(`#${MODULE_NAME}_iteration_history_container`);
+    if (container) {
+        updateIterationHistoryState(
+            container as HTMLElement,
+            popupState.pipeline.iterationHistory,
+            popupState.pipeline.iterationCount,
+        );
+    }
+}
+
 async function updateTokenEstimate(): Promise<void> {
     if (!popupElement || !popupState) return;
 
@@ -5911,13 +6962,17 @@ async function updateTokenEstimate(): Promise<void> {
         return;
     }
 
-    // Show loading state
     tokenEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
     tokenEl.className = `${MODULE_NAME}_token_estimate`;
 
-    const counts = await getStageTokenCount(popupState.pipeline, popupState.activeStageView);
+    // Use refinement token count if we're in refinement mode
+    let counts;
+    if (popupState.pipeline.isRefining && popupState.pipeline.results.rewrite && popupState.pipeline.results.analyze) {
+        counts = await getRefinementTokenCount(popupState.pipeline);
+    } else {
+        counts = await getStageTokenCount(popupState.pipeline, popupState.activeStageView);
+    }
 
-    // Check we're still on the same state
     if (!popupState || !popupElement) return;
 
     if (!counts) {
@@ -5930,47 +6985,8 @@ async function updateTokenEstimate(): Promise<void> {
     if (counts.percentage > 100) colorClass = 'danger';
     else if (counts.percentage > 80) colorClass = 'warning';
 
-    // Simple display: just prompt tokens and percentage
     tokenEl.innerHTML = `<i class="fa-solid fa-microchip"></i> ${counts.promptTokens.toLocaleString()}t (${counts.percentage}%)`;
     tokenEl.className = `${MODULE_NAME}_token_estimate ${colorClass}`;
-}
-
-// ============================================================================
-// KEYBOARD SHORTCUTS
-// ============================================================================
-
-let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
-
-function initKeyboardShortcuts(): void {
-    keyboardHandler = (e: KeyboardEvent) => {
-        if (!popupState) return;
-
-        // Ctrl+Enter to run current stage
-        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
-            if (!popupState.isGenerating) {
-                runSingleStage(popupState.activeStageView);
-            }
-        }
-
-        // Escape to cancel
-        if (e.key === 'Escape' && popupState.isGenerating && popupState.abortController) {
-            popupState.abortController.abort();
-        }
-    };
-
-    document.addEventListener('keydown', keyboardHandler);
-}
-
-function removeGlobalListeners(): void {
-    if (keyboardHandler) {
-        document.removeEventListener('keydown', keyboardHandler);
-        keyboardHandler = null;
-    }
-    if (documentClickHandler) {
-        document.removeEventListener('click', documentClickHandler);
-        documentClickHandler = null;
-    }
 }
 ```
 
@@ -5980,13 +6996,15 @@ function removeGlobalListeners(): void {
 //
 // Settings modal popup
 
-import { MODULE_NAME, DEFAULT_SYSTEM_PROMPT } from '../constants';
+import { MODULE_NAME, DEFAULT_SYSTEM_PROMPT, DEFAULT_REFINEMENT_PROMPT } from '../constants';
 import {
     getSettings,
     updateSetting,
     updateGenerationConfig,
     updateSystemPrompt,
     resetSystemPrompt,
+    updateRefinementPrompt,
+    resetRefinementPrompt,
     setDebugMode,
     getPromptPresets,
     getSchemaPresets,
@@ -6121,6 +7139,30 @@ function buildSettingsContent(): string {
         <div class="${MODULE_NAME}_settings_row_spread">
           <span id="${MODULE_NAME}_system_prompt_chars">${settings.systemPrompt.length.toLocaleString()} chars</span>
           <button id="${MODULE_NAME}_reset_system_prompt" class="menu_button">
+            <i class="fa-solid fa-rotate-left"></i>
+            Reset
+          </button>
+        </div>
+      </div>
+
+      <!-- Refinement Prompt -->
+      <div class="${MODULE_NAME}_settings_section">
+        <div class="${MODULE_NAME}_settings_section_header">
+          <i class="fa-solid fa-arrows-rotate"></i>
+          <span>Refinement Prompt</span>
+        </div>
+
+        <p class="${MODULE_NAME}_settings_hint">Template for iterative refinement. Placeholders: {{original_character}}, {{current_rewrite}}, {{current_analysis}}, {{score_results}}, {{iteration_number}}</p>
+
+        <textarea
+          id="${MODULE_NAME}_refinement_prompt"
+          class="text_pole ${MODULE_NAME}_system_prompt_textarea"
+          rows="8"
+        >${escapeHtml(settings.refinementPrompt)}</textarea>
+
+        <div class="${MODULE_NAME}_settings_row_spread">
+          <span id="${MODULE_NAME}_refinement_prompt_chars">${settings.refinementPrompt.length.toLocaleString()} chars</span>
+          <button id="${MODULE_NAME}_reset_refinement_prompt" class="menu_button">
             <i class="fa-solid fa-rotate-left"></i>
             Reset
           </button>
@@ -6298,6 +7340,29 @@ function initSettingsListeners(): void {
         toastr.info('System prompt reset to default');
     });
 
+    // Refinement prompt
+    const refinementPromptTextarea = modal.querySelector(`#${MODULE_NAME}_refinement_prompt`) as HTMLTextAreaElement;
+    const refinementPromptChars = modal.querySelector(`#${MODULE_NAME}_refinement_prompt_chars`);
+    const resetRefinementPromptBtn = modal.querySelector(`#${MODULE_NAME}_reset_refinement_prompt`);
+
+    refinementPromptTextarea?.addEventListener('input', () => {
+        updateRefinementPrompt(refinementPromptTextarea.value);
+        if (refinementPromptChars) {
+            refinementPromptChars.textContent = `${refinementPromptTextarea.value.length.toLocaleString()} chars`;
+        }
+    });
+
+    resetRefinementPromptBtn?.addEventListener('click', () => {
+        resetRefinementPrompt();
+        if (refinementPromptTextarea) {
+            refinementPromptTextarea.value = DEFAULT_REFINEMENT_PROMPT;
+        }
+        if (refinementPromptChars) {
+            refinementPromptChars.textContent = `${DEFAULT_REFINEMENT_PROMPT.length.toLocaleString()} chars`;
+        }
+        toastr.info('Refinement prompt reset to default');
+    });
+
     // Preset management
     modal.addEventListener('click', (e) => {
         const deleteBtn = (e.target as HTMLElement).closest(`.${MODULE_NAME}_preset_delete`);
@@ -6330,7 +7395,7 @@ function initSettingsListeners(): void {
                 toastr.success(`Imported ${result.prompts} prompts, ${result.schemas} schemas`);
                 refreshPresetLists();
             }
-        } catch (e) {
+        } catch {
             toastr.error('Failed to read clipboard');
         }
     });
@@ -7508,8 +8573,8 @@ function escapeHtml(text: string): string {
 
 import { MODULE_NAME, STAGE_LABELS } from '../../constants';
 import { formatResponse, formatStructuredResponse } from '../formatter';
-import { canExport } from '../../pipeline';
-import type { StageName, StageStatus, StageResult, PipelineState } from '../../types';
+import { canExport, canRefine, extractVerdict } from '../../pipeline';
+import type { StageName, StageStatus, StageResult, PipelineState, IterationVerdict } from '../../types';
 
 // ============================================================================
 // RENDER
@@ -7538,8 +8603,24 @@ export function renderResultsPanel(
 function renderLoading(stage: StageName): string {
     return `
     <div class="${MODULE_NAME}_results_loading">
-      <div class="${MODULE_NAME}_spinner"></div>
+      <i class="fa-solid fa-spinner fa-spin fa-2x"></i>
       <p>Running ${STAGE_LABELS[stage]}...</p>
+      <button id="${MODULE_NAME}_cancel_btn" class="menu_button">
+        <i class="fa-solid fa-stop"></i>
+        <span>Cancel</span>
+      </button>
+    </div>
+  `;
+}
+
+/**
+ * Render loading state for refinement
+ */
+export function renderRefinementLoading(iteration: number): string {
+    return `
+    <div class="${MODULE_NAME}_results_loading">
+      <i class="fa-solid fa-spinner fa-spin fa-2x"></i>
+      <p>Refining (Iteration #${iteration + 1})...</p>
       <button id="${MODULE_NAME}_cancel_btn" class="menu_button">
         <i class="fa-solid fa-stop"></i>
         <span>Cancel</span>
@@ -7572,12 +8653,20 @@ function renderResult(stage: StageName, result: StageResult): string {
 
     const timestamp = new Date(result.timestamp).toLocaleTimeString();
 
+    // Extract verdict if this is an analyze result
+    let verdictBadge = '';
+    if (stage === 'analyze') {
+        const verdict = extractVerdict(result.response);
+        verdictBadge = renderVerdictBadge(verdict);
+    }
+
     return `
     <div class="${MODULE_NAME}_results_content">
       <!-- Toolbar -->
       <div class="${MODULE_NAME}_results_toolbar">
         <div class="${MODULE_NAME}_results_info">
           <span class="${MODULE_NAME}_badge">${STAGE_LABELS[stage]}</span>
+          ${verdictBadge}
           <span class="${MODULE_NAME}_results_time">${timestamp}</span>
           ${result.locked ? `<span class="${MODULE_NAME}_badge ${MODULE_NAME}_badge_locked"><i class="fa-solid fa-lock"></i> Locked</span>` : ''}
         </div>
@@ -7606,6 +8695,27 @@ function renderResult(stage: StageName, result: StageResult): string {
         <!-- Populated by updateResultsPanelState -->
       </div>
     </div>
+  `;
+}
+
+function renderVerdictBadge(verdict: IterationVerdict): string {
+    const icons: Record<IterationVerdict, string> = {
+        accept: 'fa-check-circle',
+        needs_refinement: 'fa-wrench',
+        regression: 'fa-arrow-down',
+    };
+
+    const labels: Record<IterationVerdict, string> = {
+        accept: 'Accept',
+        needs_refinement: 'Needs Work',
+        regression: 'Regression',
+    };
+
+    return `
+    <span class="${MODULE_NAME}_badge ${MODULE_NAME}_verdict_badge ${MODULE_NAME}_verdict_${verdict}">
+      <i class="fa-solid ${icons[verdict]}"></i>
+      ${labels[verdict]}
+    </span>
   `;
 }
 
@@ -7641,7 +8751,7 @@ export function updateResultsPanelState(
     }
 
     if (shouldShowResult) {
-    // Only re-render result if we don't have content or timestamp changed
+        // Only re-render result if we don't have content or timestamp changed
         const existingContent = container.querySelector(`.${MODULE_NAME}_results_content`);
         const existingTimestamp = container.querySelector(`.${MODULE_NAME}_results_time`)?.textContent;
         const newTimestamp = new Date(result.timestamp).toLocaleTimeString();
@@ -7688,8 +8798,37 @@ function renderFooterActions(
     `);
     }
 
-    // Continue to next stage
-    if (nextStage) {
+    // Stage-specific actions
+    if (stage === 'analyze') {
+        const verdict = extractVerdict(result.response);
+        const canRefineResult = canRefine(pipeline);
+
+        // Refine button (if we can refine)
+        if (canRefineResult.canRun) {
+            const isRecommended = verdict === 'needs_refinement';
+            actions.push(`
+        <button id="${MODULE_NAME}_refine_btn" class="menu_button ${isRecommended ? MODULE_NAME + '_refine_recommended' : ''}">
+          <i class="fa-solid fa-arrows-rotate"></i>
+          <span>Refine</span>
+          ${pipeline.iterationCount > 0 ? `<span class="${MODULE_NAME}_iteration_badge">#${pipeline.iterationCount + 1}</span>` : ''}
+        </button>
+      `);
+        }
+
+        // Accept button (if we have a rewrite)
+        if (pipeline.results.rewrite && !pipeline.results.rewrite.locked) {
+            const isRecommended = verdict === 'accept';
+            actions.push(`
+        <button id="${MODULE_NAME}_accept_btn" class="menu_button ${isRecommended ? MODULE_NAME + '_accept_recommended' : ''}">
+          <i class="fa-solid fa-check"></i>
+          <span>Accept Rewrite</span>
+        </button>
+      `);
+        }
+    }
+
+    // Continue to next stage (not on analyze - use refine/accept instead)
+    if (nextStage && stage !== 'analyze') {
         actions.push(`
       <button id="${MODULE_NAME}_continue_btn" class="menu_button ${MODULE_NAME}_continue_btn">
         <i class="fa-solid fa-arrow-right"></i>
@@ -7709,6 +8848,189 @@ function renderFooterActions(
     }
 
     return `<div class="${MODULE_NAME}_footer_actions">${actions.join('')}</div>`;
+}
+```
+
+## FILE: src/ui/components/iteration-history.ts
+```ts
+// src/ui/components/iteration-history.ts
+//
+// Iteration history display component
+
+import { MODULE_NAME } from '../../constants';
+import type { IterationSnapshot, IterationVerdict } from '../../types';
+
+// ============================================================================
+// RENDER
+// ============================================================================
+
+/**
+ * Render the iteration history panel
+ */
+export function renderIterationHistory(
+    history: IterationSnapshot[],
+    currentIteration: number,
+    onRevert: (index: number) => void,
+): string {
+    if (history.length === 0 && currentIteration === 0) {
+        return '';
+    }
+
+    return `
+    <div class="${MODULE_NAME}_iteration_history" id="${MODULE_NAME}_iteration_history">
+      <div class="${MODULE_NAME}_iteration_header">
+        <i class="fa-solid fa-clock-rotate-left"></i>
+        <span>Iteration History</span>
+        <span class="${MODULE_NAME}_iteration_count">${currentIteration > 0 ? `Current: #${currentIteration + 1}` : 'Initial'}</span>
+      </div>
+      <div class="${MODULE_NAME}_iteration_list">
+        ${history.length === 0
+        ? `<div class="${MODULE_NAME}_iteration_empty">No previous iterations</div>`
+        : history.map((snap, i) => renderIterationItem(snap, i, history.length)).join('')
+}
+      </div>
+    </div>
+  `;
+}
+
+function renderIterationItem(snap: IterationSnapshot, index: number, total: number): string {
+    const verdictIcon = getVerdictIcon(snap.verdict);
+    const verdictClass = getVerdictClass(snap.verdict);
+    const time = new Date(snap.timestamp).toLocaleTimeString();
+
+    return `
+    <div class="${MODULE_NAME}_iteration_item ${verdictClass}" data-index="${index}">
+      <div class="${MODULE_NAME}_iteration_item_header">
+        <span class="${MODULE_NAME}_iteration_num">#${snap.iteration + 1}</span>
+        <span class="${MODULE_NAME}_iteration_verdict">
+          <i class="fa-solid ${verdictIcon}"></i>
+          ${formatVerdict(snap.verdict)}
+        </span>
+        <span class="${MODULE_NAME}_iteration_time">${time}</span>
+      </div>
+      <div class="${MODULE_NAME}_iteration_preview">
+        ${escapeHtml(snap.rewritePreview)}...
+      </div>
+      <div class="${MODULE_NAME}_iteration_actions">
+        <button
+          class="${MODULE_NAME}_iteration_revert_btn menu_button"
+          data-index="${index}"
+          title="Revert to this version"
+        >
+          <i class="fa-solid fa-rotate-left"></i>
+          Revert
+        </button>
+        <button
+          class="${MODULE_NAME}_iteration_view_btn menu_button"
+          data-index="${index}"
+          title="View full content"
+        >
+          <i class="fa-solid fa-eye"></i>
+          View
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function getVerdictIcon(verdict: IterationVerdict): string {
+    switch (verdict) {
+        case 'accept': return 'fa-check-circle';
+        case 'needs_refinement': return 'fa-wrench';
+        case 'regression': return 'fa-arrow-down';
+        default: return 'fa-question-circle';
+    }
+}
+
+function getVerdictClass(verdict: IterationVerdict): string {
+    return `${MODULE_NAME}_verdict_${verdict}`;
+}
+
+function formatVerdict(verdict: IterationVerdict): string {
+    switch (verdict) {
+        case 'accept': return 'Accepted';
+        case 'needs_refinement': return 'Needs Work';
+        case 'regression': return 'Regression';
+        default: return 'Unknown';
+    }
+}
+
+// ============================================================================
+// UPDATE
+// ============================================================================
+
+/**
+ * Update iteration history state
+ */
+export function updateIterationHistoryState(
+    container: HTMLElement,
+    history: IterationSnapshot[],
+    currentIteration: number,
+): void {
+    const historyEl = container.querySelector(`#${MODULE_NAME}_iteration_history`);
+
+    if (!historyEl && (history.length > 0 || currentIteration > 0)) {
+        // Need to add history panel
+        const html = renderIterationHistory(history, currentIteration, () => {});
+        container.insertAdjacentHTML('beforeend', html);
+    } else if (historyEl) {
+        // Update existing
+        const countEl = historyEl.querySelector(`.${MODULE_NAME}_iteration_count`);
+        if (countEl) {
+            countEl.textContent = currentIteration > 0 ? `Current: #${currentIteration + 1}` : 'Initial';
+        }
+
+        const listEl = historyEl.querySelector(`.${MODULE_NAME}_iteration_list`);
+        if (listEl) {
+            if (history.length === 0) {
+                listEl.innerHTML = `<div class="${MODULE_NAME}_iteration_empty">No previous iterations</div>`;
+            } else {
+                listEl.innerHTML = history.map((snap, i) => renderIterationItem(snap, i, history.length)).join('');
+            }
+        }
+    }
+}
+
+/**
+ * Render iteration view modal content
+ */
+export function renderIterationViewContent(snap: IterationSnapshot): string {
+    return `
+    <div class="${MODULE_NAME}_iteration_view">
+      <div class="${MODULE_NAME}_iteration_view_header">
+        <h3>Iteration #${snap.iteration + 1}</h3>
+        <span class="${MODULE_NAME}_iteration_verdict ${getVerdictClass(snap.verdict)}">
+          <i class="fa-solid ${getVerdictIcon(snap.verdict)}"></i>
+          ${formatVerdict(snap.verdict)}
+        </span>
+        <span class="${MODULE_NAME}_iteration_time">${new Date(snap.timestamp).toLocaleString()}</span>
+      </div>
+
+      <div class="${MODULE_NAME}_iteration_view_section">
+        <h4>Rewrite</h4>
+        <div class="${MODULE_NAME}_iteration_view_content">
+          ${escapeHtml(snap.rewriteResponse)}
+        </div>
+      </div>
+
+      <div class="${MODULE_NAME}_iteration_view_section">
+        <h4>Analysis</h4>
+        <div class="${MODULE_NAME}_iteration_view_content">
+          ${escapeHtml(snap.analysisResponse)}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================================
+// UTILITIES
+// ============================================================================
+
+function escapeHtml(value: unknown): string {
+    const { DOMPurify } = SillyTavern.libs;
+    const str = typeof value === 'string' ? value : String(value ?? '');
+    return DOMPurify.sanitize(str, { ALLOWED_TAGS: [] });
 }
 ```
 
@@ -9187,6 +10509,244 @@ function renderFooterActions(
 .character_tools_settings_modal .menu_button i,
 .character_tools_popup .menu_button i {
   margin-right: var(--ct-spacing-xs);
+}
+
+/* ============================================================================
+   ITERATION SYSTEM
+   ============================================================================ */
+
+/* Iteration Indicator in Header */
+.character_tools_iteration_indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-spacing-xs);
+  padding: 3px 10px;
+  border-radius: var(--ct-radius-sm);
+  font-size: 0.8em;
+  font-weight: 600;
+  background: var(--SmartThemeQuoteColor);
+  color: var(--SmartThemeBlurTintColor);
+  margin-left: auto;
+}
+
+.character_tools_iteration_indicator.hidden {
+  display: none;
+}
+
+/* Iteration History Panel */
+.character_tools_iteration_history {
+  margin-top: var(--ct-spacing-md);
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: var(--ct-radius-lg);
+  background: var(--SmartThemeBlurTintColor);
+  overflow: hidden;
+}
+
+.character_tools_iteration_header {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-spacing-sm);
+  padding: var(--ct-spacing-sm) var(--ct-spacing-md);
+  background: var(--SmartThemeChatTintColor);
+  border-bottom: 1px solid var(--SmartThemeBorderColor);
+  font-weight: 600;
+  font-size: 0.9em;
+  color: var(--SmartThemeBodyColor);
+}
+
+.character_tools_iteration_count {
+  margin-left: auto;
+  font-weight: normal;
+  opacity: 0.7;
+}
+
+.character_tools_iteration_list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.character_tools_iteration_empty {
+  padding: var(--ct-spacing-md);
+  text-align: center;
+  opacity: 0.5;
+  font-size: 0.9em;
+  color: var(--SmartThemeBodyColor);
+}
+
+/* Iteration Item */
+.character_tools_iteration_item {
+  padding: var(--ct-spacing-sm) var(--ct-spacing-md);
+  border-bottom: 1px solid var(--SmartThemeBorderColor);
+  transition: background var(--ct-transition);
+}
+
+.character_tools_iteration_item:last-child {
+  border-bottom: none;
+}
+
+.character_tools_iteration_item:hover {
+  background: var(--SmartThemeChatTintColor);
+}
+
+.character_tools_iteration_item_header {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-spacing-sm);
+  margin-bottom: var(--ct-spacing-xs);
+}
+
+.character_tools_iteration_num {
+  font-weight: 600;
+  font-size: 0.9em;
+  color: var(--SmartThemeQuoteColor);
+}
+
+.character_tools_iteration_verdict {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-spacing-xs);
+  font-size: 0.8em;
+  font-weight: 500;
+}
+
+.character_tools_iteration_time {
+  margin-left: auto;
+  font-size: 0.75em;
+  opacity: 0.5;
+  color: var(--SmartThemeBodyColor);
+}
+
+.character_tools_iteration_preview {
+  font-size: 0.85em;
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--SmartThemeBodyColor);
+  margin-bottom: var(--ct-spacing-xs);
+}
+
+.character_tools_iteration_actions {
+  display: flex;
+  gap: var(--ct-spacing-xs);
+}
+
+.character_tools_iteration_actions .menu_button {
+  padding: var(--ct-spacing-xs) var(--ct-spacing-sm);
+  font-size: 0.8em;
+}
+
+/* Verdict Colors */
+.character_tools_verdict_accept .character_tools_iteration_verdict,
+.character_tools_verdict_badge.character_tools_verdict_accept {
+  color: var(--success);
+}
+
+.character_tools_verdict_needs_refinement .character_tools_iteration_verdict,
+.character_tools_verdict_badge.character_tools_verdict_needs_refinement {
+  color: var(--warning);
+}
+
+.character_tools_verdict_regression .character_tools_iteration_verdict,
+.character_tools_verdict_badge.character_tools_verdict_regression {
+  color: var(--failure);
+}
+
+/* Verdict Badge in Results */
+.character_tools_verdict_badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ct-spacing-xs);
+  padding: 3px 10px;
+  border-radius: var(--ct-radius-sm);
+  font-size: 0.75em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.character_tools_verdict_badge.character_tools_verdict_accept {
+  background: color-mix(in srgb, var(--success) 20%, transparent);
+}
+
+.character_tools_verdict_badge.character_tools_verdict_needs_refinement {
+  background: color-mix(in srgb, var(--warning) 20%, transparent);
+}
+
+.character_tools_verdict_badge.character_tools_verdict_regression {
+  background: color-mix(in srgb, var(--failure) 20%, transparent);
+}
+
+/* Refine/Accept Button Styling */
+.character_tools_refine_recommended {
+  background: var(--warning) !important;
+  color: var(--SmartThemeBlurTintColor) !important;
+  border-color: var(--warning) !important;
+}
+
+.character_tools_accept_recommended {
+  background: var(--success) !important;
+  color: var(--SmartThemeBlurTintColor) !important;
+  border-color: var(--success) !important;
+}
+
+.character_tools_iteration_badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--SmartThemeBorderColor);
+  font-size: 0.75em;
+  font-weight: 600;
+  margin-left: var(--ct-spacing-xs);
+}
+
+/* Iteration View Modal */
+.character_tools_iteration_view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-spacing-lg);
+  color: var(--SmartThemeBodyColor);
+}
+
+.character_tools_iteration_view_header {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-spacing-md);
+  padding-bottom: var(--ct-spacing-md);
+  border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+
+.character_tools_iteration_view_header h3 {
+  margin: 0;
+  font-size: 1.2em;
+}
+
+.character_tools_iteration_view_section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-spacing-sm);
+}
+
+.character_tools_iteration_view_section h4 {
+  margin: 0;
+  font-size: 1em;
+  color: var(--SmartThemeQuoteColor);
+}
+
+.character_tools_iteration_view_content {
+  padding: var(--ct-spacing-md);
+  background: var(--SmartThemeChatTintColor);
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: var(--ct-radius-md);
+  max-height: 300px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-size: 0.9em;
+  line-height: 1.5;
 }
 ```
 

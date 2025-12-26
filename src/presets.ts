@@ -112,6 +112,9 @@ export interface TemplateContext {
   originalCharacter?: string;
   scoreResults?: string;
   rewriteResults?: string;
+  currentRewrite?: string;
+  currentAnalysis?: string;
+  iterationNumber?: string;
   charName?: string;
   userName?: string;
 }
@@ -124,12 +127,15 @@ export interface TemplateContext {
  * 2. Replace our custom placeholders ({{original_character}}, {{score_results}}, etc.)
  * 3. Replace {{char}} and {{user}} with our specific character/user names
  *    (This overrides ST's substitution which uses the active chat character)
+ * 4. Handle conditional blocks {{#if score_results}}...{{/if}}
  */
 export function processPromptTemplate(prompt: string, context: TemplateContext): string {
     // First, run ST's macro substitution for standard macros
-    // This handles things like {{time}}, {{date}}, {{random}}, etc.
     const { substituteParams } = SillyTavern.getContext();
     let processed = substituteParams(prompt);
+
+    // Handle conditional blocks first
+    processed = processConditionalBlocks(processed, context);
 
     // Now replace our custom placeholders
     if (context.originalCharacter !== undefined) {
@@ -153,6 +159,27 @@ export function processPromptTemplate(prompt: string, context: TemplateContext):
         );
     }
 
+    if (context.currentRewrite !== undefined) {
+        processed = processed.replace(
+            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.CURRENT_REWRITE), 'gi'),
+            context.currentRewrite,
+        );
+    }
+
+    if (context.currentAnalysis !== undefined) {
+        processed = processed.replace(
+            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.CURRENT_ANALYSIS), 'gi'),
+            context.currentAnalysis,
+        );
+    }
+
+    if (context.iterationNumber !== undefined) {
+        processed = processed.replace(
+            new RegExp(escapeRegex(TEMPLATE_PLACEHOLDERS.ITERATION_NUMBER), 'gi'),
+            context.iterationNumber,
+        );
+    }
+
     // Replace {{char_name}} with our specific character
     if (context.charName !== undefined) {
         processed = processed.replace(
@@ -170,8 +197,6 @@ export function processPromptTemplate(prompt: string, context: TemplateContext):
     }
 
     // IMPORTANT: Also replace {{char}} and {{user}} with our specific names
-    // This overrides whatever ST's substituteParams did, because we're working
-    // with a specific character from the character list, not the active chat
     if (context.charName !== undefined) {
         processed = processed.replace(/\{\{char\}\}/gi, context.charName);
     }
@@ -181,6 +206,46 @@ export function processPromptTemplate(prompt: string, context: TemplateContext):
     }
 
     return processed;
+}
+
+/**
+ * Process conditional blocks like {{#if score_results}}...{{/if}}
+ */
+function processConditionalBlocks(prompt: string, context: TemplateContext): string {
+    // Match {{#if variable}}...{{/if}} blocks
+    const conditionalRegex = /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/gi;
+
+    return prompt.replace(conditionalRegex, (match, variable, content) => {
+        const varName = variable.toLowerCase();
+
+        // Check if the variable has a truthy value
+        let hasValue = false;
+
+        switch (varName) {
+            case 'score_results':
+                hasValue = !!context.scoreResults?.trim();
+                break;
+            case 'rewrite_results':
+                hasValue = !!context.rewriteResults?.trim();
+                break;
+            case 'current_rewrite':
+                hasValue = !!context.currentRewrite?.trim();
+                break;
+            case 'current_analysis':
+                hasValue = !!context.currentAnalysis?.trim();
+                break;
+            case 'original_character':
+                hasValue = !!context.originalCharacter?.trim();
+                break;
+            case 'iteration_number':
+                hasValue = !!context.iterationNumber && context.iterationNumber !== '0';
+                break;
+            default:
+                hasValue = false;
+        }
+
+        return hasValue ? content : '';
+    });
 }
 
 /**
@@ -213,12 +278,18 @@ export function getUnfilledPlaceholders(prompt: string, stage: StageName, hasSco
                 }
                 break;
             case 'REWRITE_RESULTS':
+            case 'CURRENT_REWRITE':
                 if (!hasRewrite && stage !== 'rewrite') {
                     unfilled.push('{{rewrite_results}} - no rewrite results available');
                 }
                 break;
+            case 'CURRENT_ANALYSIS':
+                // Only available during refinement
+                unfilled.push('{{current_analysis}} - only available during refinement');
+                break;
             // ORIGINAL_CHARACTER is always available if we have a character
             // CHAR_NAME and USER_NAME are always available
+            // ITERATION_NUMBER is always available
         }
     }
 

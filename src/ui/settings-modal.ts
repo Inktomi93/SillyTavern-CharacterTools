@@ -2,13 +2,15 @@
 //
 // Settings modal popup
 
-import { MODULE_NAME, DEFAULT_SYSTEM_PROMPT } from '../constants';
+import { MODULE_NAME, DEFAULT_SYSTEM_PROMPT, DEFAULT_REFINEMENT_PROMPT } from '../constants';
 import {
     getSettings,
     updateSetting,
     updateGenerationConfig,
     updateSystemPrompt,
     resetSystemPrompt,
+    updateRefinementPrompt,
+    resetRefinementPrompt,
     setDebugMode,
     getPromptPresets,
     getSchemaPresets,
@@ -143,6 +145,30 @@ function buildSettingsContent(): string {
         <div class="${MODULE_NAME}_settings_row_spread">
           <span id="${MODULE_NAME}_system_prompt_chars">${settings.systemPrompt.length.toLocaleString()} chars</span>
           <button id="${MODULE_NAME}_reset_system_prompt" class="menu_button">
+            <i class="fa-solid fa-rotate-left"></i>
+            Reset
+          </button>
+        </div>
+      </div>
+
+      <!-- Refinement Prompt -->
+      <div class="${MODULE_NAME}_settings_section">
+        <div class="${MODULE_NAME}_settings_section_header">
+          <i class="fa-solid fa-arrows-rotate"></i>
+          <span>Refinement Prompt</span>
+        </div>
+
+        <p class="${MODULE_NAME}_settings_hint">Template for iterative refinement. Placeholders: {{original_character}}, {{current_rewrite}}, {{current_analysis}}, {{score_results}}, {{iteration_number}}</p>
+
+        <textarea
+          id="${MODULE_NAME}_refinement_prompt"
+          class="text_pole ${MODULE_NAME}_system_prompt_textarea"
+          rows="8"
+        >${escapeHtml(settings.refinementPrompt)}</textarea>
+
+        <div class="${MODULE_NAME}_settings_row_spread">
+          <span id="${MODULE_NAME}_refinement_prompt_chars">${settings.refinementPrompt.length.toLocaleString()} chars</span>
+          <button id="${MODULE_NAME}_reset_refinement_prompt" class="menu_button">
             <i class="fa-solid fa-rotate-left"></i>
             Reset
           </button>
@@ -320,6 +346,29 @@ function initSettingsListeners(): void {
         toastr.info('System prompt reset to default');
     });
 
+    // Refinement prompt
+    const refinementPromptTextarea = modal.querySelector(`#${MODULE_NAME}_refinement_prompt`) as HTMLTextAreaElement;
+    const refinementPromptChars = modal.querySelector(`#${MODULE_NAME}_refinement_prompt_chars`);
+    const resetRefinementPromptBtn = modal.querySelector(`#${MODULE_NAME}_reset_refinement_prompt`);
+
+    refinementPromptTextarea?.addEventListener('input', () => {
+        updateRefinementPrompt(refinementPromptTextarea.value);
+        if (refinementPromptChars) {
+            refinementPromptChars.textContent = `${refinementPromptTextarea.value.length.toLocaleString()} chars`;
+        }
+    });
+
+    resetRefinementPromptBtn?.addEventListener('click', () => {
+        resetRefinementPrompt();
+        if (refinementPromptTextarea) {
+            refinementPromptTextarea.value = DEFAULT_REFINEMENT_PROMPT;
+        }
+        if (refinementPromptChars) {
+            refinementPromptChars.textContent = `${DEFAULT_REFINEMENT_PROMPT.length.toLocaleString()} chars`;
+        }
+        toastr.info('Refinement prompt reset to default');
+    });
+
     // Preset management
     modal.addEventListener('click', (e) => {
         const deleteBtn = (e.target as HTMLElement).closest(`.${MODULE_NAME}_preset_delete`);
@@ -352,7 +401,7 @@ function initSettingsListeners(): void {
                 toastr.success(`Imported ${result.prompts} prompts, ${result.schemas} schemas`);
                 refreshPresetLists();
             }
-        } catch (e) {
+        } catch {
             toastr.error('Failed to read clipboard');
         }
     });

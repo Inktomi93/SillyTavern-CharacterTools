@@ -25,6 +25,7 @@ FILES=(
   "src/ui/components/pipeline-nav.ts"
   "src/ui/components/stage-config.ts"
   "src/ui/components/results-panel.ts"
+  "src/ui/components/iteration-history.ts"
   # Templates
   "templates/panel.html"
   # Config & assets

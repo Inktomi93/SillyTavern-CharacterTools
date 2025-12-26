@@ -791,12 +791,13 @@ function initPipelineNavListeners(): void {
         }
 
         const runBtn = (e.target as HTMLElement).closest(`#${MODULE_NAME}_run_selected_btn`);
-        if (runBtn) {
-            runSelectedStages();
+        if (runBtn && popupState) {
+            // CHANGED: Run only the current active stage, not all selected
+            runSingleStage(popupState.activeStageView);
         }
 
         const runAllBtn = (e.target as HTMLElement).closest(`#${MODULE_NAME}_run_all_btn`);
-        if (runAllBtn) {
+        if (runAllBtn && popupState) {
             runAllStages();
         }
 

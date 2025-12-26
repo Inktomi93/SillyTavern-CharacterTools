@@ -39,7 +39,7 @@ export function renderPipelineNav(
           ${!hasCharacter ? 'disabled' : ''}
         >
           <i class="fa-solid fa-play"></i>
-          <span>Run Selected</span>
+          <span>Run Stage</span>
         </button>
         <button
           id="${MODULE_NAME}_run_all_btn"
@@ -47,7 +47,7 @@ export function renderPipelineNav(
           ${!hasCharacter ? 'disabled' : ''}
         >
           <i class="fa-solid fa-forward"></i>
-          <span>Run All</span>
+          <span>Run Selected</span>
         </button>
         <button
           id="${MODULE_NAME}_reset_pipeline_btn"

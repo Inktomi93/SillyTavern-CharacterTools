@@ -12,23 +12,23 @@ This document is a comprehensive reference for developing SillyTavern extensions
 
 ## Table of Contents
 
-1. [Project Structure](#project-structure)
-2. [Manifest Configuration](#manifest-configuration)
-3. [Core APIs](#core-apis)
-4. [State Management](#state-management)
-5. [Events System](#events-system)
-6. [Slash Commands](#slash-commands)
-7. [Text Generation](#text-generation)
-8. [Preset Management](#preset-management)
-9. [Service Classes](#service-classes)
-10. [Prompt Interceptors](#prompt-interceptors)
-11. [Custom Macros](#custom-macros)
-12. [Bundling](#bundling)
-13. [Error Handling](#error-handling)
-14. [Best Practices](#best-practices)
-15. [Complete API Reference](#complete-api-reference)
+1. [Manifest Configuration](#manifest-configuration)
+2. [Core APIs](#core-apis)
+3. [State Management](#state-management)
+4. [Events System](#events-system)
+5. [Slash Commands](#slash-commands)
+6. [Text Generation](#text-generation)
+7. [Preset Management](#preset-management)
+8. [Service Classes](#service-classes)
+9. [Prompt Interceptors](#prompt-interceptors)
+10. [Custom Macros](#custom-macros)
+11. [Bundling](#bundling)
+12. [Error Handling](#error-handling)
+13. [Best Practices](#best-practices)
+14. [Complete API Reference](#complete-api-reference)
 
 ---
+
 ### TypeScript Declaration File
 
 Place `globals.d.ts` in your extension root for autocomplete support:
@@ -110,7 +110,7 @@ declare global {
 ### Field Reference
 
 | Field | Required | Description |
-|-------|----------|-------------|
+| ----- | -------- | ----------- |
 | `display_name` | Yes | Name shown in "Manage Extensions" menu |
 | `js` | Yes | Main JavaScript file path |
 | `author` | Yes | Author name or contact info |
@@ -345,7 +345,7 @@ const {
 } = SillyTavern.getContext();
 ```
 
-### Service Classes
+### Service Classes Overview
 
 ```javascript
 const {
@@ -1232,6 +1232,7 @@ For argument support, use slash commands instead.
 ### When to Bundle
 
 Bundle your extension when:
+
 - Using TypeScript
 - Using npm packages not in SillyTavern.libs
 - Multiple source files
@@ -1240,8 +1241,9 @@ Bundle your extension when:
 ### Webpack Setup
 
 Use the official templates:
-- TypeScript + Webpack: https://github.com/SillyTavern/Extension-WebpackTemplate
-- React + Webpack: https://github.com/SillyTavern/Extension-ReactTemplate
+
+- TypeScript + Webpack: <https://github.com/SillyTavern/Extension-WebpackTemplate>
+- React + Webpack: <https://github.com/SillyTavern/Extension-ReactTemplate>
 
 ### Import Wrapper for Bundled Extensions
 

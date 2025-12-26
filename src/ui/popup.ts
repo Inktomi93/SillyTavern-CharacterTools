@@ -21,17 +21,18 @@ import {
     canRefine,
     validatePipeline,
     validateRefinement,
-    setExportData,
     buildStagePrompt,
     getStageSchema,
     startRefinement,
     completeRefinement,
     acceptRewrite,
     revertToIteration,
-    parseRewriteResponse,
-    applyRewriteToCharacter,
+    updateFieldSelection,
+    selectAllFields,
+    deselectAllFields,
+    generateExportData,
 } from '../pipeline';
-import { getPromptPreset, getSchemaPreset } from '../settings';
+import { getPromptPreset, getSchemaPreset, getFullSystemPrompt } from '../settings';
 import { runStageGeneration, runRefinementGeneration, getStageTokenCount, getRefinementTokenCount, getApiInfo, isApiReady } from '../generator';
 import { renderCharacterSelect, updateCharacterSelectState, renderDropdownItems, updateFieldTokenCounts, clearTokenCache } from './components/character-select';
 import { getPopulatedFields } from '../character';
@@ -63,7 +64,6 @@ let popupState: {
     abortController: AbortController | null;
     activeStageView: StageName;
     historyLoaded: boolean;
-    // Store debounced functions for cleanup
     debouncedFunctions: Array<{ cancel: () => void }>;
 } | null = null;
 
@@ -91,7 +91,6 @@ function subscribeEvents(): void {
         },
 
         onCharEdited: (data: { detail?: { character: Character; id: string }; character?: Character; id?: number }) => {
-            // Handle both payload formats - CHARACTER_EDITED uses { detail: { character, id: string } }
             const character = data.detail?.character ?? data.character;
             const id = data.detail?.id !== undefined ? parseInt(data.detail.id, 10) : data.id;
 
@@ -100,7 +99,6 @@ function subscribeEvents(): void {
         },
 
         onCharDeleted: (data: { id: number; character: Character }) => {
-            // CHARACTER_DELETED uses flat { id: number, character }
             debugLog('info', 'Character deleted', { id: data.id });
             handleCharacterDeleted(data.id);
         },
@@ -176,12 +174,10 @@ function updateApiStatus(): void {
 function refreshSelectedCharacter(editedId?: number): void {
     if (!popupState || popupState.pipeline.characterIndex === null) return;
 
-    // Get fresh characters from context - don't use cached
     const { characters } = SillyTavern.getContext();
     const charList = characters as Character[];
     const index = popupState.pipeline.characterIndex;
 
-    // If a specific character was edited and it's not ours, ignore
     if (editedId !== undefined && editedId !== index) {
         return;
     }
@@ -216,7 +212,6 @@ function handleCharacterDeleted(deletedId: number): void {
         handleCharacterInvalidated();
         toastr.warning('Selected character was deleted');
     } else if (currentIndex > deletedId) {
-        // Get fresh characters from context
         const { characters } = SillyTavern.getContext();
         const charList = characters as Character[];
 
@@ -279,17 +274,11 @@ function removeGlobalListeners(): void {
         keyboardHandler = null;
     }
 
-    // MEMORY LEAK FIX: Cancel all pending debounced operations on cleanup.
-    // Without this, debounced functions could:
-    // 1. Fire after the popup is closed (accessing stale popupState)
-    // 2. Accumulate if popup is opened/closed rapidly
-    // 3. Hold references to DOM elements that should be garbage collected
     if (popupState?.debouncedFunctions) {
         popupState.debouncedFunctions.forEach(fn => fn.cancel());
         popupState.debouncedFunctions = [];
     }
 }
-
 
 // ============================================================================
 // MAIN ENTRY
@@ -299,7 +288,6 @@ export async function openMainPopup(): Promise<void> {
     const { Popup, POPUP_TYPE } = SillyTavern.getContext();
     const { DOMPurify } = SillyTavern.libs;
 
-    // Reset initialization flags for fresh popup
     characterSelectInitialized = false;
 
     popupState = {
@@ -331,7 +319,6 @@ export async function openMainPopup(): Promise<void> {
     });
 
     popup.show().then(() => {
-    // Cleanup while state still exists
         if (popupState?.abortController) {
             popupState.abortController.abort();
         }
@@ -339,7 +326,6 @@ export async function openMainPopup(): Promise<void> {
         removeGlobalListeners();
         clearTokenCache();
 
-        // Now safe to null
         popupState = null;
         popupElement = null;
         characterSelectInitialized = false;
@@ -374,7 +360,6 @@ export async function openMainPopup(): Promise<void> {
         toastr.error('Character Tools opened but some features may not work.');
     }
 }
-
 
 // ============================================================================
 // POPUP HTML
@@ -456,7 +441,11 @@ function initComponents(characters: Character[]): void {
     // Character select
     const charContainer = popupElement.querySelector(`#${MODULE_NAME}_character_select_container`);
     if (charContainer) {
-        charContainer.innerHTML = renderCharacterSelect(characters, popupState.pipeline.characterIndex);
+        charContainer.innerHTML = renderCharacterSelect(
+            characters,
+            popupState.pipeline.characterIndex,
+            popupState.pipeline.selectedFields,
+        );
         initCharacterSelectListeners();
     }
 
@@ -479,6 +468,7 @@ function initComponents(characters: Character[]): void {
             popupState.activeStageView,
             popupState.pipeline.configs[popupState.activeStageView],
             null,
+            !!popupState.pipeline.character,
         );
         initStageConfigListeners();
     }
@@ -509,7 +499,6 @@ function initComponents(characters: Character[]): void {
     // Header buttons
     popupElement.querySelector(`#${MODULE_NAME}_settings_btn`)?.addEventListener('click', () => {
         openSettingsModal(() => {
-            // After settings close, check if any deleted presets were in use
             if (popupState) {
                 checkForDeletedPresetReferences();
             }
@@ -535,7 +524,6 @@ function checkForDeletedPresetReferences(): void {
     for (const stage of STAGES) {
         const config = popupState.pipeline.configs[stage];
 
-        // Check prompt preset
         if (config.promptPresetId && !getPromptPreset(config.promptPresetId)) {
             debugLog('info', 'Clearing deleted prompt preset reference', { stage, presetId: config.promptPresetId });
             popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, stage, {
@@ -543,7 +531,6 @@ function checkForDeletedPresetReferences(): void {
             });
         }
 
-        // Check schema preset
         if (config.schemaPresetId && !getSchemaPreset(config.schemaPresetId)) {
             debugLog('info', 'Clearing deleted schema preset reference', { stage, presetId: config.schemaPresetId });
             popupState.pipeline = pipelineUpdateStageConfig(popupState.pipeline, stage, {
@@ -562,7 +549,6 @@ let characterSelectInitialized = false;
 function initCharacterSelectListeners(): void {
     if (!popupElement || !popupState) return;
 
-    // Guard against multiple initializations
     if (characterSelectInitialized) {
         debugLog('info', 'Character select listeners already initialized, skipping', null);
         return;
@@ -584,7 +570,6 @@ function initCharacterSelectListeners(): void {
     let currentResults: Array<{ char: Character; index: number }> = [];
 
     const handleSearch = () => {
-        // Get fresh characters from context
         const { characters } = SillyTavern.getContext();
         const currentChars = characters as Character[];
 
@@ -621,11 +606,6 @@ function initCharacterSelectListeners(): void {
         dropdown.classList.remove('hidden');
     };
 
-    // MEMORY LEAK FIX: Store reference to debounced function for cleanup.
-    // lodash.debounce returns a function with a .cancel() method.
-    // We must call cancel() when the popup closes to prevent:
-    // 1. Delayed execution after popup is gone
-    // 2. References being held to closed popup's DOM/state
     const debouncedSearch = lodash.debounce(handleSearch, 150);
     popupState.debouncedFunctions.push(debouncedSearch);
     searchInput.addEventListener('input', debouncedSearch);
@@ -652,7 +632,6 @@ function initCharacterSelectListeners(): void {
         }
     });
 
-    // Document click handler - add to eventCleanup for proper removal
     const handleDocumentClick = (e: MouseEvent) => {
         if (!searchInput.contains(e.target as Node) && !dropdown.contains(e.target as Node)) {
             dropdown.classList.add('hidden');
@@ -685,6 +664,22 @@ function initCharacterSelectListeners(): void {
             return;
         }
 
+        // Select all fields
+        if (target.closest(`#${MODULE_NAME}_select_all_fields`) && popupState?.pipeline.character) {
+            popupState.pipeline = selectAllFields(popupState.pipeline);
+            updateCharacterSelect();
+            updateTokenEstimate();
+            return;
+        }
+
+        // Deselect all fields
+        if (target.closest(`#${MODULE_NAME}_select_none_fields`) && popupState) {
+            popupState.pipeline = deselectAllFields(popupState.pipeline);
+            updateCharacterSelect();
+            updateTokenEstimate();
+            return;
+        }
+
         const toggle = target.closest(`.${MODULE_NAME}_field_toggle`);
         if (toggle) {
             const fieldKey = toggle.getAttribute('data-field');
@@ -698,32 +693,66 @@ function initCharacterSelectListeners(): void {
             }
         }
     });
+
+    // Field checkbox changes
+    container.addEventListener('change', (e) => {
+        const target = e.target as HTMLInputElement;
+
+        // Main field checkbox
+        if (target.classList.contains(`${MODULE_NAME}_field_checkbox`) && popupState) {
+            const fieldKey = target.dataset.field!;
+            const isArray = target.dataset.isArray === 'true';
+
+            if (isArray) {
+                const field = getPopulatedFields(popupState.pipeline.character!).find(f => f.key === fieldKey);
+                if (field && Array.isArray(field.rawValue)) {
+                    const newValue = target.checked
+                        ? (field.rawValue as string[]).map((_, i) => i)
+                        : [];
+                    popupState.pipeline = updateFieldSelection(popupState.pipeline, fieldKey, newValue);
+                }
+            } else {
+                popupState.pipeline = updateFieldSelection(popupState.pipeline, fieldKey, target.checked);
+            }
+
+            updateCharacterSelect();
+            updateTokenEstimate();
+            return;
+        }
+
+        // Alt greeting checkbox
+        if (target.classList.contains(`${MODULE_NAME}_alt_greeting_checkbox`) && popupState) {
+            const fieldKey = target.dataset.field!;
+            const index = parseInt(target.dataset.index!, 10);
+
+            const current = (popupState.pipeline.selectedFields[fieldKey] as number[]) || [];
+            let newValue: number[];
+
+            if (target.checked) {
+                newValue = [...current, index].sort((a, b) => a - b);
+            } else {
+                newValue = current.filter(i => i !== index);
+            }
+
+            popupState.pipeline = updateFieldSelection(popupState.pipeline, fieldKey, newValue);
+            updateCharacterSelect();
+            updateTokenEstimate();
+            return;
+        }
+    });
 }
-
-
 
 async function selectCharacter(char: Character, index: number): Promise<void> {
     if (!popupState) return;
 
-    // RACE CONDITION FIX: Capture the index we're selecting, not the object reference.
-    // The char object reference can become stale if the character list refreshes during
-    // async operations (loadIterationHistory). By comparing indices instead of object
-    // references, we ensure we're still operating on the intended selection.
     const selectedIndex = index;
 
     popupState.pipeline = setCharacter(popupState.pipeline, char, index);
     popupState.historyLoaded = false;
     updateAllComponents();
 
-    // Load iteration history for this character
     const history = await loadIterationHistory(char);
 
-    // RACE CONDITION GUARD: Check by index, not object reference.
-    // Between the await above and now, the user could have:
-    // 1. Selected a different character
-    // 2. Cleared the selection
-    // 3. The character list could have refreshed
-    // Comparing by index is stable across these scenarios.
     if (popupState && popupState.pipeline.characterIndex === selectedIndex) {
         if (history && history.length > 0) {
             popupState.pipeline = {
@@ -737,12 +766,9 @@ async function selectCharacter(char: Character, index: number): Promise<void> {
         updateIterationHistory();
     }
 
-    // Update token counts - also guard against stale selection
     setTimeout(async () => {
         if (!popupElement || !popupState?.pipeline.character) return;
 
-        // RACE CONDITION GUARD: Same check - ensure we're still on the same character
-        // before updating UI with token counts that could take time to calculate.
         if (popupState.pipeline.characterIndex !== selectedIndex) return;
 
         const container = popupElement.querySelector(`#${MODULE_NAME}_character_select_container`);
@@ -754,7 +780,6 @@ async function selectCharacter(char: Character, index: number): Promise<void> {
 
     debugLog('info', 'Character selected', { name: char.name, index });
 }
-
 
 // ============================================================================
 // PIPELINE NAV LISTENERS
@@ -792,7 +817,6 @@ function initPipelineNavListeners(): void {
 
         const runBtn = (e.target as HTMLElement).closest(`#${MODULE_NAME}_run_selected_btn`);
         if (runBtn && popupState) {
-            // CHANGED: Run only the current active stage, not all selected
             runSingleStage(popupState.activeStageView);
         }
 
@@ -803,7 +827,6 @@ function initPipelineNavListeners(): void {
 
         const resetBtn = (e.target as HTMLElement).closest(`#${MODULE_NAME}_reset_pipeline_btn`);
         if (resetBtn && popupState) {
-            // Confirm before reset
             const { Popup, POPUP_RESULT } = SillyTavern.getContext();
             const confirmed = await Popup.show.confirm(
                 'Reset Pipeline?',
@@ -813,7 +836,7 @@ function initPipelineNavListeners(): void {
             if (confirmed !== POPUP_RESULT.AFFIRMATIVE) return;
 
             popupState.pipeline = resetPipeline(popupState.pipeline, true);
-            popupState.historyLoaded = true; // No history to load after reset
+            popupState.historyLoaded = true;
             updateAllComponents();
         }
     });
@@ -852,20 +875,7 @@ function initStageConfigListeners(): void {
 
     const { lodash } = SillyTavern.libs;
 
-    // NULL CHECK FIX: The debounced function can fire after a delay, during which
-    // popupState could become null (user closed popup). We must check popupState
-    // at execution time, not just at creation time.
-    //
-    // Why this matters:
-    // 1. User types in textarea
-    // 2. Debounce delays execution by 300ms
-    // 3. User closes popup at 200ms
-    // 4. At 300ms, handler fires with popupState = null
-    // 5. Without guard: crash. With guard: safe no-op.
     const debouncedInputHandler = lodash.debounce((e: Event) => {
-        // GUARD: Check popupState exists before any access.
-        // This is the critical null check - popupState can be nulled
-        // by popup close between debounce schedule and execution.
         if (!popupState) {
             debugLog('info', 'Debounced input handler fired after popup closed, ignoring', null);
             return;
@@ -891,10 +901,6 @@ function initStageConfigListeners(): void {
         }
     }, 300);
 
-    // MEMORY LEAK FIX: Track for cleanup on popup close.
-    // Combined with Fix 2 - ensures this debounced function is cancelled
-    // when popup closes, preventing the null access scenario entirely
-    // (belt and suspenders with the null check above).
     popupState.debouncedFunctions.push(debouncedInputHandler);
     container.addEventListener('input', debouncedInputHandler);
 
@@ -914,6 +920,12 @@ function initStageConfigListeners(): void {
         const runBtn = target.closest(`#${MODULE_NAME}_run_stage_btn`);
         if (runBtn && popupState) {
             runSingleStage(popupState.activeStageView);
+            return;
+        }
+
+        const previewBtn = target.closest(`#${MODULE_NAME}_preview_prompt_btn`);
+        if (previewBtn && popupState) {
+            await showPromptPreview();
             return;
         }
 
@@ -1052,11 +1064,6 @@ function initResultsPanelListeners(): void {
             }
         }
 
-        // Apply to Character
-        if (target.closest(`#${MODULE_NAME}_apply_btn`) && popupState) {
-            await handleApplyToCharacter();
-        }
-
         // Refine
         if (target.closest(`#${MODULE_NAME}_refine_btn`) && popupState) {
             runRefinement();
@@ -1073,18 +1080,14 @@ function initResultsPanelListeners(): void {
         if (target.closest(`#${MODULE_NAME}_copy_btn`) && popupState) {
             const result = popupState.pipeline.results[popupState.activeStageView];
             if (result) {
-                navigator.clipboard.writeText(result.response);
+                await navigator.clipboard.writeText(result.response);
                 toastr.success('Copied to clipboard');
             }
         }
 
         // Export
         if (target.closest(`#${MODULE_NAME}_export_btn`) && popupState) {
-            popupState.pipeline = setExportData(popupState.pipeline);
-            if (popupState.pipeline.exportData) {
-                navigator.clipboard.writeText(popupState.pipeline.exportData);
-                toastr.success('Export copied to clipboard');
-            }
+            exportSession();
         }
 
         // Cancel generation
@@ -1095,89 +1098,95 @@ function initResultsPanelListeners(): void {
 }
 
 // ============================================================================
-// APPLY TO CHARACTER
+// EXPORT SESSION
 // ============================================================================
 
-async function handleApplyToCharacter(): Promise<void> {
-    if (!popupState || !popupState.pipeline.results.rewrite || !popupState.pipeline.character) {
-        toastr.warning('No rewrite to apply');
+function exportSession(): void {
+    if (!popupState?.pipeline.character) return;
+
+    const { moment } = SillyTavern.libs;
+    const pipeline = popupState.pipeline;
+    const character = pipeline.character;
+
+    const content = generateExportData(pipeline);
+    if (!content) {
+        toastr.error('Nothing to export');
         return;
     }
 
-    const { Popup, POPUP_TYPE, POPUP_RESULT } = SillyTavern.getContext();
+    // Download as file
+    const blob = new Blob([content], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${character?.name.replace(/[^a-z0-9]/gi, '_') || 'character'}_session_${moment().format('YYYYMMDD_HHmmss')}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    toastr.success('Session exported');
+}
+
+// ============================================================================
+// PROMPT PREVIEW
+// ============================================================================
+
+async function showPromptPreview(): Promise<void> {
+    if (!popupState?.pipeline.character) {
+        toastr.warning('Select a character first');
+        return;
+    }
+
+    const { Popup, POPUP_TYPE, getTokenCountAsync } = SillyTavern.getContext();
     const { DOMPurify } = SillyTavern.libs;
 
-    const rewriteResponse = popupState.pipeline.results.rewrite.response;
-    const parsed = parseRewriteResponse(rewriteResponse);
+    const stage = popupState.activeStageView;
+    const fullPrompt = buildStagePrompt(popupState.pipeline, stage);
+    const systemPrompt = getFullSystemPrompt(stage);
 
-    // Build preview content
-    let previewHtml = `<div class="${MODULE_NAME}_apply_preview">`;
-    previewHtml += `<p><strong>Parse method:</strong> ${parsed.parseMethod}</p>`;
-
-    if (parsed.fields.length === 0) {
-        previewHtml += `<p class="${MODULE_NAME}_apply_warning">
-            <i class="fa-solid fa-triangle-exclamation"></i>
-            No recognized character fields found in the rewrite output.
-            The raw content will be copied to clipboard instead.
-        </p>`;
-        previewHtml += `<details><summary>Raw content preview</summary><pre>${DOMPurify.sanitize(parsed.raw.substring(0, 500))}...</pre></details>`;
-    } else {
-        previewHtml += `<p><strong>Fields to update (${parsed.fields.length}):</strong></p>`;
-        previewHtml += '<ul>';
-        for (const field of parsed.fields) {
-            const preview = field.value.substring(0, 100);
-            previewHtml += `<li><strong>${DOMPurify.sanitize(field.label)}:</strong> ${DOMPurify.sanitize(preview)}${field.value.length > 100 ? '...' : ''}</li>`;
-        }
-        previewHtml += '</ul>';
+    if (!fullPrompt) {
+        toastr.warning('No prompt configured');
+        return;
     }
-    previewHtml += '</div>';
 
-    // Show confirmation
-    const confirmContent = `
-        <h3>Apply Rewrite to Character?</h3>
-        <p>This will update <strong>${DOMPurify.sanitize(popupState.pipeline.character.name)}</strong> with the rewritten content.</p>
-        ${previewHtml}
+    const promptTokens = await getTokenCountAsync(fullPrompt);
+    const systemTokens = await getTokenCountAsync(systemPrompt);
+    const totalTokens = promptTokens + systemTokens;
+
+    const content = `
+      <div class="${MODULE_NAME}_prompt_preview">
+        <h3>Prompt Preview - ${STAGE_LABELS[stage]}</h3>
+
+        <div class="${MODULE_NAME}_preview_section">
+          <div class="${MODULE_NAME}_preview_header">
+            <h4>System Prompt</h4>
+            <span class="${MODULE_NAME}_preview_tokens">${systemTokens.toLocaleString()} tokens</span>
+          </div>
+          <pre class="${MODULE_NAME}_preview_content">${DOMPurify.sanitize(systemPrompt, { ALLOWED_TAGS: [] })}</pre>
+        </div>
+
+        <div class="${MODULE_NAME}_preview_section">
+          <div class="${MODULE_NAME}_preview_header">
+            <h4>Stage Prompt</h4>
+            <span class="${MODULE_NAME}_preview_tokens">${promptTokens.toLocaleString()} tokens</span>
+          </div>
+          <pre class="${MODULE_NAME}_preview_content">${DOMPurify.sanitize(fullPrompt, { ALLOWED_TAGS: [] })}</pre>
+        </div>
+
+        <div class="${MODULE_NAME}_preview_total">
+          <strong>Total: ${totalTokens.toLocaleString()} tokens</strong>
+        </div>
+      </div>
     `;
 
-    const popup = new Popup(confirmContent, POPUP_TYPE.CONFIRM, '', {
+    await new Popup(DOMPurify.sanitize(content), POPUP_TYPE.TEXT, '', {
         wide: true,
-        okButton: parsed.fields.length > 0 ? 'Apply Changes' : 'Copy Raw Content',
-        cancelButton: 'Cancel',
-    });
-
-    const result = await popup.show();
-
-    if (result !== POPUP_RESULT.AFFIRMATIVE) {
-        return;
-    }
-
-    // If no fields parsed, just copy raw content
-    if (parsed.fields.length === 0) {
-        navigator.clipboard.writeText(parsed.raw);
-        toastr.info('Raw content copied to clipboard');
-        return;
-    }
-
-    // Apply the changes
-    const applyResult = await applyRewriteToCharacter(popupState.pipeline, parsed.fields);
-
-    if (applyResult.success) {
-        toastr.success(`Updated ${applyResult.updatedFields.length} fields: ${applyResult.updatedFields.join(', ')}`);
-
-        // Emit custom event for other extensions
-        const { eventSource } = SillyTavern.getContext();
-        await eventSource.emit('character_tools_rewrite_applied', {
-            characterName: popupState.pipeline.character.name,
-            characterIndex: popupState.pipeline.characterIndex,
-            updatedFields: applyResult.updatedFields,
-            iterationCount: popupState.pipeline.iterationCount,
-        });
-
-        // Refresh character data
-        refreshSelectedCharacter();
-    } else {
-        toastr.error(applyResult.error || 'Failed to apply changes');
-    }
+        large: true,
+        allowVerticalScrolling: true,
+        okButton: 'Close',
+        cancelButton: false,
+    }).show();
 }
 
 // ============================================================================
@@ -1228,7 +1237,6 @@ async function handleRevertToIteration(index: number): Promise<void> {
     popupState.pipeline = revertToIteration(popupState.pipeline, index);
     toastr.info(`Reverted to iteration #${index + 1}`);
 
-    // Save updated history
     if (popupState.pipeline.character) {
         await saveIterationHistory(popupState.pipeline.character, popupState.pipeline.iterationHistory);
     }
@@ -1385,18 +1393,15 @@ async function runRefinement(): Promise<void> {
         toastr.warning(validation.warnings.join('\n'));
     }
 
-    // Snapshot current state before starting refinement
     const preRefinementState = {
         iterationCount: popupState.pipeline.iterationCount,
         iterationHistory: [...popupState.pipeline.iterationHistory],
     };
 
-    // Start refinement - this snapshots current state
     popupState.pipeline = startRefinement(popupState.pipeline);
     popupState.isRefining = true;
     popupState.abortController = new AbortController();
 
-    // Show refinement loading state
     const resultsContainer = popupElement?.querySelector(`#${MODULE_NAME}_results_container`);
     if (resultsContainer) {
         resultsContainer.innerHTML = renderRefinementLoading(popupState.pipeline.iterationCount);
@@ -1421,15 +1426,12 @@ async function runRefinement(): Promise<void> {
 
             toastr.success(`Refinement #${popupState.pipeline.iterationCount} complete`);
 
-            // Save iteration history
             if (popupState.pipeline.character) {
                 await saveIterationHistory(popupState.pipeline.character, popupState.pipeline.iterationHistory);
             }
 
-            // Switch to analyze view so user can review
             popupState.activeStageView = 'analyze';
         } else {
-            // Restore pre-refinement state on failure
             popupState.pipeline = {
                 ...popupState.pipeline,
                 iterationCount: preRefinementState.iterationCount,
@@ -1441,7 +1443,6 @@ async function runRefinement(): Promise<void> {
             }
         }
     } catch (e) {
-        // Restore pre-refinement state on error
         popupState.pipeline = {
             ...popupState.pipeline,
             iterationCount: preRefinementState.iterationCount,
@@ -1479,6 +1480,7 @@ function updateCharacterSelect(): void {
             container as HTMLElement,
             popupState.pipeline.character,
             popupState.pipeline.characterIndex,
+            popupState.pipeline.selectedFields,
         );
     }
 }
@@ -1525,6 +1527,7 @@ function updateStageConfigUI(): void {
             popupState.activeStageView,
             popupState.pipeline.configs[popupState.activeStageView],
             popupState.isGenerating || popupState.isRefining,
+            !!popupState.pipeline.character,
         );
     }
 }
@@ -1592,7 +1595,6 @@ async function updateTokenEstimate(): Promise<void> {
     tokenEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
     tokenEl.className = `${MODULE_NAME}_token_estimate`;
 
-    // Use refinement token count if we're in refinement mode
     let counts;
     if (popupState.pipeline.isRefining && popupState.pipeline.results.rewrite && popupState.pipeline.results.analyze) {
         counts = await getRefinementTokenCount(popupState.pipeline);

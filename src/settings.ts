@@ -2,13 +2,14 @@
 import {
     MODULE_NAME,
     DEFAULT_SETTINGS,
-    DEFAULT_SYSTEM_PROMPT,
+    BASE_SYSTEM_PROMPT,
     DEFAULT_GENERATION_CONFIG,
     DEFAULT_STAGE_DEFAULTS,
-    DEFAULT_REFINEMENT_PROMPT,
+    BASE_REFINEMENT_PROMPT,
     BUILTIN_PROMPT_PRESETS,
     BUILTIN_SCHEMA_PRESETS,
     SETTINGS_VERSION,
+    CURRENT_PRESET_VERSION,
 } from './constants';
 import type {
     Settings,
@@ -31,19 +32,16 @@ type MigrationFn = (settings: Partial<Settings>) => void;
 const migrations: Record<number, MigrationFn> = {
     // v1 -> v2: Add preset system, stage defaults
     2: (settings) => {
-        // Handle old useRawMode -> useCurrentSettings
         const oldSettings = settings as Record<string, unknown>;
         if (oldSettings.useRawMode !== undefined) {
             settings.useCurrentSettings = !oldSettings.useRawMode;
             delete oldSettings.useRawMode;
         }
 
-        // Handle old jsonSchema -> discard (can't migrate custom schemas reliably)
         if (oldSettings.jsonSchema !== undefined) {
             delete oldSettings.jsonSchema;
         }
 
-        // Handle old useStructuredOutput -> apply to score stage
         if (oldSettings.useStructuredOutput !== undefined) {
             if (!settings.stageDefaults) {
                 settings.stageDefaults = structuredClone(DEFAULT_STAGE_DEFAULTS);
@@ -53,10 +51,55 @@ const migrations: Record<number, MigrationFn> = {
         }
     },
 
-    // v2 -> v3: Add refinement prompt
+    // v2 -> v3: Add refinement prompt (old format)
     3: (settings) => {
-        if (!settings.refinementPrompt) {
-            settings.refinementPrompt = DEFAULT_REFINEMENT_PROMPT;
+        // This migration added the old single refinementPrompt
+        // Will be migrated again in v4
+    },
+
+    // v3 -> v4: Split prompts, add preset versioning
+    4: (settings) => {
+        const oldSettings = settings as Record<string, unknown>;
+
+        // Migrate single systemPrompt to split
+        if (oldSettings.systemPrompt !== undefined) {
+            const oldPrompt = oldSettings.systemPrompt as string;
+            if (oldPrompt && oldPrompt.trim()) {
+                settings.userSystemPrompt = oldPrompt;
+            }
+            settings.baseSystemPrompt = BASE_SYSTEM_PROMPT;
+            delete oldSettings.systemPrompt;
+        }
+
+        // Migrate single refinementPrompt to split
+        if (oldSettings.refinementPrompt !== undefined) {
+            const oldPrompt = oldSettings.refinementPrompt as string;
+            if (oldPrompt && oldPrompt.trim()) {
+                settings.userRefinementPrompt = oldPrompt;
+            }
+            settings.baseRefinementPrompt = BASE_REFINEMENT_PROMPT;
+            delete oldSettings.refinementPrompt;
+        }
+
+        // Initialize stage prompts
+        if (!settings.stageSystemPrompts) {
+            settings.stageSystemPrompts = { score: '', rewrite: '', analyze: '' };
+        }
+
+        // Add presetVersion to existing presets that lack it
+        if (settings.promptPresets) {
+            for (const preset of settings.promptPresets) {
+                if ((preset as PromptPreset & { presetVersion?: number }).presetVersion === undefined) {
+                    (preset as PromptPreset).presetVersion = 0;
+                }
+            }
+        }
+        if (settings.schemaPresets) {
+            for (const preset of settings.schemaPresets) {
+                if ((preset as SchemaPreset & { presetVersion?: number }).presetVersion === undefined) {
+                    (preset as SchemaPreset).presetVersion = 0;
+                }
+            }
         }
     },
 };
@@ -109,13 +152,12 @@ export function getSettings(): Settings {
     }
 
     // Merge with defaults to ensure all fields exist
-    // lodash.merge does deep merge, existing values override defaults
     const merged = lodash.merge(
         structuredClone(DEFAULT_SETTINGS),
         existing,
     ) as Settings;
 
-    // Ensure builtin presets exist (they might be missing if user has old settings)
+    // Ensure builtin presets exist
     const builtinsAdded = ensureBuiltinPresets(merged);
     needsSave = needsSave || builtinsAdded;
 
@@ -135,7 +177,6 @@ export function getSettings(): Settings {
 function ensureBuiltinPresets(settings: Settings): boolean {
     let modified = false;
 
-    // Ensure prompt presets
     const existingPromptIds = new Set(settings.promptPresets.map(p => p.id));
     for (const builtin of BUILTIN_PROMPT_PRESETS) {
         if (!existingPromptIds.has(builtin.id)) {
@@ -144,7 +185,6 @@ function ensureBuiltinPresets(settings: Settings): boolean {
         }
     }
 
-    // Ensure schema presets
     const existingSchemaIds = new Set(settings.schemaPresets.map(p => p.id));
     for (const builtin of BUILTIN_SCHEMA_PRESETS) {
         if (!existingSchemaIds.has(builtin.id)) {
@@ -187,32 +227,92 @@ export function updateGenerationConfig(updates: Partial<GenerationConfig>): void
     debugLog('info', 'Generation config updated', updates);
 }
 
+// ============================================================================
+// SYSTEM PROMPT MANAGEMENT
+// ============================================================================
+
 /**
- * Update system prompt
+ * Get the complete system prompt (base + user + stage-specific)
  */
-export function updateSystemPrompt(prompt: string): void {
-    updateSetting('systemPrompt', prompt);
+export function getFullSystemPrompt(stage?: StageName): string {
+    const settings = getSettings();
+    const parts: string[] = [];
+
+    if (settings.baseSystemPrompt?.trim()) {
+        parts.push(settings.baseSystemPrompt.trim());
+    }
+
+    if (settings.userSystemPrompt?.trim()) {
+        parts.push(settings.userSystemPrompt.trim());
+    }
+
+    if (stage && settings.stageSystemPrompts?.[stage]?.trim()) {
+        parts.push(settings.stageSystemPrompts[stage].trim());
+    }
+
+    return parts.join('\n\n');
 }
 
 /**
- * Reset system prompt to default
+ * Get the complete refinement instructions (base + user)
  */
-export function resetSystemPrompt(): void {
-    updateSetting('systemPrompt', DEFAULT_SYSTEM_PROMPT);
+export function getFullRefinementInstructions(): string {
+    const settings = getSettings();
+    const parts: string[] = [];
+
+    if (settings.baseRefinementPrompt?.trim()) {
+        parts.push(settings.baseRefinementPrompt.trim());
+    }
+
+    if (settings.userRefinementPrompt?.trim()) {
+        parts.push(settings.userRefinementPrompt.trim());
+    }
+
+    return parts.join('\n\n');
 }
 
-/**
- * Update refinement prompt
- */
-export function updateRefinementPrompt(prompt: string): void {
-    updateSetting('refinementPrompt', prompt);
+export function updateUserSystemPrompt(prompt: string): void {
+    updateSetting('userSystemPrompt', prompt);
 }
 
-/**
- * Reset refinement prompt to default
- */
-export function resetRefinementPrompt(): void {
-    updateSetting('refinementPrompt', DEFAULT_REFINEMENT_PROMPT);
+export function updateBaseSystemPrompt(prompt: string): void {
+    updateSetting('baseSystemPrompt', prompt);
+}
+
+export function updateStageSystemPrompt(stage: StageName, prompt: string): void {
+    const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
+    const settings = extensionSettings[MODULE_NAME] as Settings;
+
+    if (!settings.stageSystemPrompts) {
+        settings.stageSystemPrompts = { score: '', rewrite: '', analyze: '' };
+    }
+
+    settings.stageSystemPrompts[stage] = prompt;
+    saveSettingsDebounced();
+}
+
+export function updateUserRefinementPrompt(prompt: string): void {
+    updateSetting('userRefinementPrompt', prompt);
+}
+
+export function updateBaseRefinementPrompt(prompt: string): void {
+    updateSetting('baseRefinementPrompt', prompt);
+}
+
+export function resetUserSystemPrompt(): void {
+    updateSetting('userSystemPrompt', '');
+}
+
+export function resetBaseSystemPrompt(): void {
+    updateSetting('baseSystemPrompt', BASE_SYSTEM_PROMPT);
+}
+
+export function resetUserRefinementPrompt(): void {
+    updateSetting('userRefinementPrompt', '');
+}
+
+export function resetBaseRefinementPrompt(): void {
+    updateSetting('baseRefinementPrompt', BASE_REFINEMENT_PROMPT);
 }
 
 /**
@@ -288,7 +388,7 @@ export function getPromptPreset(id: string): PromptPreset | null {
 /**
  * Save a new prompt preset
  */
-export function savePromptPreset(preset: Omit<PromptPreset, 'id' | 'isBuiltin' | 'createdAt' | 'updatedAt'>): PromptPreset {
+export function savePromptPreset(preset: Omit<PromptPreset, 'id' | 'isBuiltin' | 'presetVersion' | 'createdAt' | 'updatedAt'>): PromptPreset {
     const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
     const settings = extensionSettings[MODULE_NAME] as Settings;
     const { uuidv4 } = SillyTavern.getContext();
@@ -298,6 +398,7 @@ export function savePromptPreset(preset: Omit<PromptPreset, 'id' | 'isBuiltin' |
         ...preset,
         id: `custom_prompt_${uuidv4()}`,
         isBuiltin: false,
+        presetVersion: CURRENT_PRESET_VERSION,
         createdAt: now,
         updatedAt: now,
     };
@@ -312,7 +413,7 @@ export function savePromptPreset(preset: Omit<PromptPreset, 'id' | 'isBuiltin' |
 /**
  * Update an existing prompt preset (only custom presets)
  */
-export function updatePromptPreset(id: string, updates: Partial<Omit<PromptPreset, 'id' | 'isBuiltin' | 'createdAt'>>): boolean {
+export function updatePromptPreset(id: string, updates: Partial<Omit<PromptPreset, 'id' | 'isBuiltin' | 'presetVersion' | 'createdAt'>>): boolean {
     const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
     const settings = extensionSettings[MODULE_NAME] as Settings;
 
@@ -338,7 +439,6 @@ export function updatePromptPreset(id: string, updates: Partial<Omit<PromptPrese
 
 /**
  * Delete a prompt preset (only custom presets)
- * Returns the deleted preset ID if successful, null otherwise
  */
 export function deletePromptPreset(id: string): string | null {
     const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
@@ -355,7 +455,6 @@ export function deletePromptPreset(id: string): string | null {
 
     settings.promptPresets.splice(index, 1);
 
-    // Clear any stage defaults that reference this preset
     for (const stage of ['score', 'rewrite', 'analyze'] as const) {
         if (settings.stageDefaults[stage]?.promptPresetId === id) {
             settings.stageDefaults[stage].promptPresetId = null;
@@ -393,12 +492,11 @@ export function getSchemaPreset(id: string): SchemaPreset | null {
 /**
  * Save a new schema preset
  */
-export function saveSchemaPreset(preset: Omit<SchemaPreset, 'id' | 'isBuiltin' | 'createdAt' | 'updatedAt'>): SchemaPreset {
+export function saveSchemaPreset(preset: Omit<SchemaPreset, 'id' | 'isBuiltin' | 'presetVersion' | 'createdAt' | 'updatedAt'>): SchemaPreset {
     const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
     const settings = extensionSettings[MODULE_NAME] as Settings;
     const { uuidv4 } = SillyTavern.getContext();
 
-    // Auto-fix schema before saving
     const fixedSchema = ensureSchemaHasAdditionalProperties(preset.schema);
 
     const now = Date.now();
@@ -407,6 +505,7 @@ export function saveSchemaPreset(preset: Omit<SchemaPreset, 'id' | 'isBuiltin' |
         schema: fixedSchema,
         id: `custom_schema_${uuidv4()}`,
         isBuiltin: false,
+        presetVersion: CURRENT_PRESET_VERSION,
         createdAt: now,
         updatedAt: now,
     };
@@ -421,7 +520,7 @@ export function saveSchemaPreset(preset: Omit<SchemaPreset, 'id' | 'isBuiltin' |
 /**
  * Update an existing schema preset (only custom presets)
  */
-export function updateSchemaPreset(id: string, updates: Partial<Omit<SchemaPreset, 'id' | 'isBuiltin' | 'createdAt'>>): boolean {
+export function updateSchemaPreset(id: string, updates: Partial<Omit<SchemaPreset, 'id' | 'isBuiltin' | 'presetVersion' | 'createdAt'>>): boolean {
     const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
     const settings = extensionSettings[MODULE_NAME] as Settings;
 
@@ -434,7 +533,6 @@ export function updateSchemaPreset(id: string, updates: Partial<Omit<SchemaPrese
         return false;
     }
 
-    // Auto-fix schema if provided
     if (updates.schema) {
         updates.schema = ensureSchemaHasAdditionalProperties(updates.schema);
     }
@@ -452,7 +550,6 @@ export function updateSchemaPreset(id: string, updates: Partial<Omit<SchemaPrese
 
 /**
  * Delete a schema preset (only custom presets)
- * Returns the deleted preset ID if successful, null otherwise
  */
 export function deleteSchemaPreset(id: string): string | null {
     const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
@@ -469,7 +566,6 @@ export function deleteSchemaPreset(id: string): string | null {
 
     settings.schemaPresets.splice(index, 1);
 
-    // Clear any stage defaults that reference this preset
     for (const stage of ['score', 'rewrite', 'analyze'] as const) {
         if (settings.stageDefaults[stage]?.schemaPresetId === id) {
             settings.stageDefaults[stage].schemaPresetId = null;
@@ -535,7 +631,6 @@ function addAdditionalPropertiesToNode(node: JsonSchemaValue): void {
         });
     }
 
-    // Handle $defs
     if (node.$defs && typeof node.$defs === 'object') {
         for (const def of Object.values(node.$defs)) {
             if (def && typeof def === 'object') {

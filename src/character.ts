@@ -3,7 +3,7 @@
 // Character utilities - field extraction, formatting, etc.
 
 import { CHARACTER_FIELDS } from './constants';
-import type { Character, CharacterField, PopulatedField, DepthPrompt, CharacterBook } from './types';
+import type { Character, CharacterField, PopulatedField, DepthPrompt, CharacterBook, FieldSelection } from './types';
 
 // ============================================================================
 // FIELD VALUE EXTRACTION
@@ -13,13 +13,7 @@ import type { Character, CharacterField, PopulatedField, DepthPrompt, CharacterB
  * Get a value from a character using a dot-notation path.
  * Supports paths like 'data.system_prompt' or 'data.extensions.depth_prompt'
  */
-function getValueByPath(obj: Character, path: string | undefined, key: string): unknown {
-    // If no path specified, try top-level key
-    if (!path) {
-        return (obj as unknown as Record<string, unknown>)[key];
-    }
-
-    // Navigate the path
+function getValueByPath(obj: Character, path: string): unknown {
     const parts = path.split('.');
     let current: unknown = obj;
 
@@ -152,46 +146,35 @@ export function getPopulatedFields(char: Character): PopulatedField[] {
 
     for (const field of CHARACTER_FIELDS) {
         const type = field.type || 'string';
-        const value = getValueByPath(char, field.path, field.key);
+        let value = getValueByPath(char, field.path);
 
-        // Also check top-level for fields that might exist in both places
-        // (ST flattens some fields to top-level)
-        let finalValue = value;
-        if (!isPopulatedValue(value, type) && !field.path) {
-            // Value not found at path, field has no path - just skip
-            continue;
-        }
-
-        // For fields that can be at top-level OR in data.*, prefer data.* but fall back
-        if (!isPopulatedValue(value, type) && field.path) {
-            // Try top-level as fallback
-            const topLevel = (char as unknown as Record<string, unknown>)[field.key];
-            if (isPopulatedValue(topLevel, type)) {
-                finalValue = topLevel;
-            }
+        // For top-level fields, also check direct access
+        if (!isPopulatedValue(value, type) && !field.path.includes('.')) {
+            value = (char as unknown as Record<string, unknown>)[field.key];
         }
 
         // Special case: creator_notes can also be 'creatorcomment' at top level
-        if (field.key === 'creator_notes' && !isPopulatedValue(finalValue, type)) {
+        if (field.key === 'creator_notes' && !isPopulatedValue(value, type)) {
             const legacy = char.creatorcomment;
             if (legacy && typeof legacy === 'string' && legacy.trim()) {
-                finalValue = legacy;
+                value = legacy;
             }
         }
 
-        if (!isPopulatedValue(finalValue, type)) {
+        if (!isPopulatedValue(value, type)) {
             continue;
         }
 
-        const formatted = formatFieldValue(finalValue, field);
+        const formatted = formatFieldValue(value, field);
         if (!formatted) continue;
 
         populated.push({
             key: field.key,
             label: field.label,
             value: formatted,
+            rawValue: value,
             charCount: formatted.length,
-            scoreable: field.scoreable,
+            type: field.type,
         });
     }
 
@@ -217,11 +200,54 @@ export function getPopulatedFieldCount(char: Character): number {
 // ============================================================================
 
 /**
- * Build a formatted character summary for prompts
+ * Build a formatted character summary for prompts (all fields)
  */
 export function buildCharacterSummary(char: Character): string {
     const fields = getPopulatedFields(char);
     const sections = fields.map(f => `### ${f.label}\n${f.value}`);
+    return `# CHARACTER: ${char.name}\n\n${sections.join('\n\n')}`;
+}
+
+/**
+ * Build character summary using only selected fields.
+ * For alternate_greetings, only include greetings at selected indices.
+ */
+export function buildCharacterSummaryFromSelection(
+    char: Character,
+    selection: FieldSelection,
+): string {
+    const sections: string[] = [];
+    const allFields = getPopulatedFields(char);
+
+    for (const field of allFields) {
+        const selected = selection[field.key];
+
+        // Not selected at all
+        if (!selected) continue;
+
+        // Array field with no indices selected
+        if (Array.isArray(selected) && selected.length === 0) continue;
+
+        if (field.key === 'alternate_greetings' && Array.isArray(selected)) {
+            // Only include selected greeting indices
+            const greetings = field.rawValue as string[];
+            const selectedGreetings = (selected as number[])
+                .filter(i => i >= 0 && i < greetings.length)
+                .map(i => `**Greeting ${i + 1}:**\n${greetings[i].trim()}`)
+                .join('\n\n');
+
+            if (selectedGreetings) {
+                sections.push(`### ${field.label}\n\n${selectedGreetings}`);
+            }
+        } else {
+            sections.push(`### ${field.label}\n\n${field.value}`);
+        }
+    }
+
+    if (sections.length === 0) {
+        return `# CHARACTER: ${char.name}\n\n(No fields selected)`;
+    }
+
     return `# CHARACTER: ${char.name}\n\n${sections.join('\n\n')}`;
 }
 
@@ -270,13 +296,6 @@ export function validateCharacter(char: Character): string[] {
         issues.push('Character has no populated fields');
     }
 
-    // Check for very short scoreable fields
-    for (const field of fields) {
-        if (field.charCount < 20 && field.scoreable) {
-            issues.push(`${field.label} is very short (${field.charCount} chars)`);
-        }
-    }
-
     return issues;
 }
 
@@ -299,53 +318,4 @@ export function prepareForSearch(chars: Character[]): Array<{ char: Character; i
             ].filter(Boolean).join(' ').toLowerCase(),
         }))
         .filter(item => item.char?.name);
-}
-
-// ============================================================================
-// RAW VALUE ACCESS (for applying rewrites)
-// ============================================================================
-
-/**
- * Get the raw (unformatted) value for a field.
- * Used when we need to compare or modify actual field values.
- */
-export function getRawFieldValue(char: Character, fieldKey: string): unknown {
-    const field = CHARACTER_FIELDS.find(f => f.key === fieldKey);
-    if (!field) {
-        // Try direct top-level access
-        return (char as unknown as Record<string, unknown>)[fieldKey];
-    }
-
-    const value = getValueByPath(char, field.path, field.key);
-
-    // Fallback to top-level
-    if (value === undefined && field.path) {
-        return (char as unknown as Record<string, unknown>)[fieldKey];
-    }
-
-    // Special case for creator_notes
-    if (fieldKey === 'creator_notes' && value === undefined) {
-        return char.creatorcomment;
-    }
-
-    return value;
-}
-
-/**
- * Get list of field keys that can be written back to a character.
- * These are the top-level keys ST uses when saving.
- */
-export function getWritableFieldKeys(): string[] {
-    return [
-        'description',
-        'personality',
-        'first_mes',
-        'scenario',
-        'mes_example',
-        'system_prompt',
-        'post_history_instructions',
-        'creator_notes',
-        // Note: alternate_greetings, depth_prompt, character_book
-        // are in data.* and need special handling
-    ];
 }

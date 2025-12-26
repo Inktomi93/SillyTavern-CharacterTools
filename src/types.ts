@@ -9,6 +9,16 @@ export type StageName = 'score' | 'rewrite' | 'analyze';
 export type StageStatus = 'pending' | 'running' | 'complete' | 'skipped';
 
 // ============================================================================
+// FIELD SELECTION
+// ============================================================================
+
+export interface FieldSelection {
+    [fieldKey: string]: boolean | number[];
+    // boolean for simple fields (true = included)
+    // number[] for alternate_greetings (array of selected indices)
+}
+
+// ============================================================================
 // CHARACTER
 // ============================================================================
 
@@ -84,17 +94,17 @@ export interface Character {
 export interface CharacterField {
     key: string;
     label: string;
-    scoreable: boolean;
-    path?: string;  // For nested fields like 'data.system_prompt'
-    type?: 'string' | 'array' | 'object';  // Default is 'string'
+    path: string;
+    type: 'string' | 'array' | 'object';
 }
 
 export interface PopulatedField {
     key: string;
     label: string;
     value: string;
+    rawValue: unknown;
     charCount: number;
-    scoreable: boolean;
+    type: 'string' | 'array' | 'object';
 }
 
 // ============================================================================
@@ -166,6 +176,7 @@ export interface PromptPreset {
     prompt: string;
     stages: StageName[];  // Empty array = available for all stages
     isBuiltin: boolean;
+    presetVersion: number;
     createdAt: number;
     updatedAt: number;
 }
@@ -176,6 +187,7 @@ export interface SchemaPreset {
     schema: StructuredOutputSchema;
     stages: StageName[];  // Empty array = available for all stages
     isBuiltin: boolean;
+    presetVersion: number;
     createdAt: number;
     updatedAt: number;
 }
@@ -214,22 +226,6 @@ export interface IterationSnapshot {
     analysisPreview: string;
     verdict: IterationVerdict;
     timestamp: number;
-}
-
-// ============================================================================
-// PARSED REWRITE
-// ============================================================================
-
-export interface ParsedRewriteField {
-    key: string;
-    label: string;
-    value: string;
-}
-
-export interface ParsedRewrite {
-    fields: ParsedRewriteField[];
-    raw: string;
-    parseMethod: 'json' | 'markdown' | 'heuristic' | 'raw';
 }
 
 // ============================================================================
@@ -274,6 +270,9 @@ export interface PipelineState {
     iterationHistory: IterationSnapshot[];
     isRefining: boolean;  // True when in refinement mode (after first analyze)
 
+    // Field selection
+    selectedFields: FieldSelection;
+
     // Export
     exportData: string | null;
 }
@@ -286,7 +285,21 @@ export interface Settings {
     // Generation settings
     useCurrentSettings: boolean;
     generationConfig: GenerationConfig;
-    systemPrompt: string;
+
+    // Split system prompt (base + user additions)
+    baseSystemPrompt: string;
+    userSystemPrompt: string;
+
+    // Split refinement prompt (base + user additions)
+    baseRefinementPrompt: string;
+    userRefinementPrompt: string;
+
+    // Optional per-stage system prompt additions
+    stageSystemPrompts: {
+        score: string;
+        rewrite: string;
+        analyze: string;
+    };
 
     // Presets
     promptPresets: PromptPreset[];
@@ -294,9 +307,6 @@ export interface Settings {
 
     // Per-stage defaults
     stageDefaults: Record<StageName, StageDefaults>;
-
-    // Refinement settings
-    refinementPrompt: string;
 
     // Debug
     debugMode: boolean;

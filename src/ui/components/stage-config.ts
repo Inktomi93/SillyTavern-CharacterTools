@@ -15,6 +15,7 @@ export function renderStageConfig(
     stage: StageName,
     config: StageConfig,
     tokenEstimate: { tokens: number; percentage: number } | null,
+    hasCharacter: boolean,  // ADD THIS PARAMETER
 ): string {
     const promptPresets = getPromptPresets(stage);
     const schemaPresets = getSchemaPresets(stage);
@@ -56,7 +57,7 @@ export function renderStageConfig(
         else if (tokenEstimate.percentage > 50) tokenClass = 'warning';
     }
 
-    // Check if current content differs from selected preset (for save button state)
+    // Check if current content differs from selected preset
     const promptDiffersFromPreset = config.promptPresetId
         ? getPromptPreset(config.promptPresetId)?.prompt !== promptContent
         : promptContent.trim().length > 0;
@@ -65,7 +66,6 @@ export function renderStageConfig(
         ? JSON.stringify(getSchemaPreset(config.schemaPresetId)?.schema, null, 2) !== schemaContent
         : schemaContent.trim().length > 0;
 
-    // Show fix button if schema has warnings or is invalid but parseable
     const showFixButton = config.useStructuredOutput && schemaContent.trim() &&
         (schemaValidation.warnings?.length || !schemaValidation.valid);
 
@@ -160,7 +160,7 @@ export function renderStageConfig(
           <button
             id="${MODULE_NAME}_fix_schema_btn"
             class="menu_button menu_button_icon"
-            title="Auto-fix schema (adds additionalProperties: false, etc.)"
+            title="Auto-fix schema"
             ${!showFixButton ? 'disabled' : ''}
           >
             <i class="fa-solid fa-wrench"></i>
@@ -183,11 +183,19 @@ export function renderStageConfig(
         <div id="${MODULE_NAME}_token_estimate" class="${MODULE_NAME}_token_estimate ${tokenClass}">
           ${tokenDisplay}
         </div>
+        <button
+          id="${MODULE_NAME}_preview_prompt_btn"
+          class="menu_button"
+          title="Preview the complete prompt that will be sent"
+          ${!hasCharacter ? 'disabled' : ''}
+        >
+          <i class="fa-solid fa-eye"></i>
+          <span>Preview</span>
+        </button>
       </div>
     </div>
   `;
 }
-
 
 // ============================================================================
 // UPDATE STATE
@@ -209,7 +217,6 @@ export async function handleGenerateSchema(): Promise<string | null> {
         return null;
     }
 
-    // Show loading overlay
     showSchemaGenerationLoading(true);
 
     try {
@@ -222,7 +229,6 @@ export async function handleGenerateSchema(): Promise<string | null> {
             return result.schema!;
         } else {
             toastr.error(result.error || 'Generation failed');
-            // Return the broken schema anyway so they can see/fix it
             return result.schema || null;
         }
     } finally {
@@ -230,9 +236,6 @@ export async function handleGenerateSchema(): Promise<string | null> {
     }
 }
 
-/**
- * Show/hide loading overlay for schema generation
- */
 function showSchemaGenerationLoading(show: boolean): void {
     const existingOverlay = document.querySelector(`.${MODULE_NAME}_loading_overlay`);
 
@@ -256,6 +259,7 @@ export function updateStageConfigState(
     stage: StageName,
     config: StageConfig,
     isGenerating: boolean,
+    hasCharacter: boolean,
 ): void {
     const promptPresets = getPromptPresets(stage);
     const schemaPresets = getSchemaPresets(stage);
@@ -276,13 +280,11 @@ export function updateStageConfigState(
             const preset = getPromptPreset(config.promptPresetId);
             if (preset) promptContent = preset.prompt;
         }
-        // Only update if different to preserve cursor position
         if (promptTextarea.value !== promptContent) {
             promptTextarea.value = promptContent;
         }
         promptTextarea.disabled = isGenerating;
 
-        // Update char count
         const charCount = container.querySelector(`.${MODULE_NAME}_char_count`);
         if (charCount) {
             charCount.textContent = `${promptContent.length.toLocaleString()} chars`;
@@ -332,15 +334,10 @@ export function updateStageConfigState(
     // Update schema action buttons
     updateSchemaActionButtons(container, schemaTextarea?.value || '');
 
-    // Update run button
-    const runBtn = container.querySelector(`#${MODULE_NAME}_run_stage_btn`) as HTMLButtonElement;
-    if (runBtn) {
-        runBtn.disabled = isGenerating;
-        if (isGenerating) {
-            runBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Running...';
-        } else {
-            runBtn.innerHTML = `<i class="fa-solid fa-play"></i> Run ${STAGE_LABELS[stage]} <kbd>Ctrl+Enter</kbd>`;
-        }
+    // Update preview button
+    const previewBtn = container.querySelector(`#${MODULE_NAME}_preview_prompt_btn`) as HTMLButtonElement;
+    if (previewBtn) {
+        previewBtn.disabled = isGenerating || !hasCharacter;
     }
 
     // Update save preset buttons
@@ -368,7 +365,6 @@ function updateSchemaActionButtons(container: HTMLElement, schemaContent: string
 
     if (fixBtn && hasContent) {
         const validation = validateSchema(schemaContent);
-        // Enable fix button if there are warnings or if it's invalid but might be fixable
         const needsFix = (validation.warnings?.length ?? 0) > 0 || !validation.valid;
         fixBtn.disabled = !needsFix;
     } else if (fixBtn) {
@@ -377,7 +373,7 @@ function updateSchemaActionButtons(container: HTMLElement, schemaContent: string
 }
 
 // ============================================================================
-// SCHEMA ACTION HANDLERS (called from popup.ts)
+// SCHEMA ACTION HANDLERS
 // ============================================================================
 
 export async function handleValidateSchema(schemaContent: string): Promise<void> {
@@ -393,7 +389,6 @@ export async function handleValidateSchema(schemaContent: string): Promise<void>
         return;
     }
 
-    // For warnings/info with more than 2 items, use Popup instead of toastr
     const { Popup, POPUP_TYPE } = SillyTavern.getContext();
 
     if (validation.warnings?.length) {
@@ -434,7 +429,6 @@ export function handleFixSchema(schemaContent: string): string | null {
         return null;
     }
 
-    // First try to parse it
     const validation = validateSchema(schemaContent);
 
     if (!validation.schema) {
@@ -446,7 +440,6 @@ export function handleFixSchema(schemaContent: string): string | null {
         const fixed = autoFixSchema(validation.schema);
         const fixedJson = JSON.stringify(fixed, null, 2);
 
-        // Validate the fixed version
         const revalidation = validateSchema(fixedJson);
 
         if (!revalidation.valid) {
@@ -498,7 +491,6 @@ function updateSavePresetButtons(container: HTMLElement, config: StageConfig): v
             ? getPromptPreset(config.promptPresetId)?.prompt || ''
             : '';
 
-        // Enable if there's content and it differs from the selected preset
         const hasContent = currentPrompt.length > 0;
         const isDifferent = currentPrompt !== presetPrompt;
         savePromptBtn.disabled = !hasContent || (config.promptPresetId !== null && !isDifferent);
@@ -510,7 +502,6 @@ function updateSavePresetButtons(container: HTMLElement, config: StageConfig): v
             ? JSON.stringify(getSchemaPreset(config.schemaPresetId)?.schema, null, 2)
             : '';
 
-        // Enable if there's valid content and it differs from the selected preset
         const hasContent = currentSchema.length > 0;
         const isDifferent = currentSchema !== presetSchema;
         const isValid = hasContent ? validateSchema(currentSchema).valid : false;
@@ -519,7 +510,7 @@ function updateSavePresetButtons(container: HTMLElement, config: StageConfig): v
 }
 
 // ============================================================================
-// SAVE PRESET HANDLERS (called from popup.ts)
+// SAVE PRESET HANDLERS
 // ============================================================================
 
 export interface SavePresetResult {
@@ -572,7 +563,6 @@ export async function handleSaveSchemaPreset(stage: StageName, schemaContent: st
         return { success: false };
     }
 
-    // Validate first
     const validation = validateSchema(schemaContent);
     if (!validation.valid) {
         toastr.error(`Invalid schema: ${validation.error}`);
@@ -621,7 +611,6 @@ function renderPresetOptions(presets: (PromptPreset | SchemaPreset)[], selectedI
 }
 
 function updateSchemaValidation(container: HTMLElement, schemaContent: string): void {
-    // Remove existing status
     const existingStatus = container.querySelector(`.${MODULE_NAME}_schema_status`);
     if (existingStatus) {
         existingStatus.remove();

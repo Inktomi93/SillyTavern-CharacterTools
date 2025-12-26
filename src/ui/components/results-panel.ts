@@ -226,15 +226,7 @@ function renderFooterActions(
     }
 
     // Stage-specific actions
-    if (stage === 'rewrite' && pipeline.character) {
-        // Apply to Character button - the primary action for rewrite stage
-        actions.push(`
-      <button id="${MODULE_NAME}_apply_btn" class="menu_button ${MODULE_NAME}_apply_btn">
-        <i class="fa-solid fa-check-double"></i>
-        <span>Apply to Character</span>
-      </button>
-    `);
-    }
+    // REMOVED: Apply to Character button for rewrite stage
 
     if (stage === 'analyze') {
         const verdict = extractVerdict(result.response);
@@ -286,3 +278,4 @@ function renderFooterActions(
 
     return `<div class="${MODULE_NAME}_footer_actions">${actions.join('')}</div>`;
 }
+

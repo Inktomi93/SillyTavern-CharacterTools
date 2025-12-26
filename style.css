@@ -1777,6 +1777,131 @@
 }
 
 /* ============================================================================
+   PROMPT PREVIEW
+   ============================================================================ */
+
+.character_tools_prompt_preview {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ct-spacing-lg);
+    color: var(--SmartThemeBodyColor);
+}
+
+.character_tools_prompt_preview h3 {
+    margin: 0;
+    padding-bottom: var(--ct-spacing-md);
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+
+.character_tools_preview_section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ct-spacing-sm);
+}
+
+.character_tools_preview_header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.character_tools_preview_header h4 {
+    margin: 0;
+    font-size: 1em;
+    color: var(--SmartThemeQuoteColor);
+}
+
+.character_tools_preview_tokens {
+    font-size: 0.85em;
+    font-family: var(--monoFontFamily);
+    opacity: 0.7;
+}
+
+.character_tools_preview_content {
+    margin: 0;
+    padding: var(--ct-spacing-md);
+    background: var(--SmartThemeChatTintColor);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: var(--ct-radius-md);
+    font-family: var(--monoFontFamily);
+    font-size: 0.85em;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.character_tools_preview_total {
+    padding: var(--ct-spacing-md);
+    background: var(--SmartThemeQuoteColor);
+    color: var(--SmartThemeBlurTintColor);
+    border-radius: var(--ct-radius-md);
+    text-align: center;
+}
+
+/* ============================================================================
+   SETTINGS ADVANCED SECTIONS
+   ============================================================================ */
+
+.character_tools_settings_advanced {
+    margin-top: var(--ct-spacing-sm);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: var(--ct-radius-md);
+}
+
+.character_tools_settings_advanced summary {
+    padding: var(--ct-spacing-sm) var(--ct-spacing-md);
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--SmartThemeBodyColor);
+    display: flex;
+    align-items: center;
+    gap: var(--ct-spacing-sm);
+    user-select: none;
+}
+
+.character_tools_settings_advanced summary:hover {
+    background: var(--SmartThemeChatTintColor);
+}
+
+.character_tools_settings_advanced[open] summary {
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+
+.character_tools_settings_advanced[open] summary i {
+    transform: rotate(90deg);
+}
+
+.character_tools_settings_advanced summary i {
+    transition: transform var(--ct-transition);
+    font-size: 0.8em;
+}
+
+.character_tools_settings_advanced_content {
+    padding: var(--ct-spacing-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--ct-spacing-sm);
+}
+
+.character_tools_settings_warning {
+    color: var(--warning, #f39c12);
+}
+
+.character_tools_settings_subsection {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ct-spacing-xs);
+}
+
+.character_tools_settings_label {
+    font-weight: 500;
+    font-size: 0.9em;
+    color: var(--SmartThemeBodyColor);
+}
+
+
+/* ============================================================================
    UTILITIES
    ============================================================================ */
 

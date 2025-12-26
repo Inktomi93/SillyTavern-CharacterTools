@@ -2,12 +2,8 @@
 //
 // Handles LLM generation for pipeline stages and refinement.
 // Supports both ST's current settings and custom API configuration.
-//
-// NOTE: Abort/cancel only works between API calls, not during active streaming.
-// Once a streaming request starts, it will complete or error - the abort signal
-// is checked before starting and after completion, but cannot interrupt mid-stream.
 
-import { getSettings } from './settings';
+import { getSettings, getFullSystemPrompt } from './settings';
 import { debugLog, logError } from './debug';
 import type {
     StructuredOutputSchema,
@@ -59,9 +55,6 @@ export function getApiInfo(): { source: string; model: string; isReady: boolean 
 
 /**
  * Run generation for a pipeline stage.
- *
- * NOTE: The abort signal is checked before and after generation, but cannot
- * interrupt an active streaming request mid-stream.
  */
 export async function runStageGeneration(
     state: PipelineState,
@@ -102,6 +95,9 @@ export async function runStageGeneration(
         context.name1 || 'User',
     );
 
+    // Get full system prompt for this stage
+    const systemPrompt = getFullSystemPrompt(stage);
+
     debugLog('info', 'Starting stage generation', {
         stage,
         character: state.character.name,
@@ -109,10 +105,11 @@ export async function runStageGeneration(
         useStructured: !!jsonSchema,
         schemaName: jsonSchema?.name,
         promptLength: processedPrompt.length,
+        systemPromptLength: systemPrompt.length,
     });
 
     const result = await executeGeneration(
-        settings.systemPrompt,
+        systemPrompt,
         processedPrompt,
         jsonSchema,
         signal,
@@ -129,9 +126,6 @@ export async function runStageGeneration(
 
 /**
  * Run refinement generation.
- *
- * NOTE: The abort signal is checked before and after generation, but cannot
- * interrupt an active streaming request mid-stream.
  */
 export async function runRefinementGeneration(
     state: PipelineState,
@@ -171,15 +165,18 @@ export async function runRefinementGeneration(
         context.name1 || 'User',
     );
 
+    // Get system prompt (use 'rewrite' stage additions for refinement)
+    const systemPrompt = getFullSystemPrompt('rewrite');
+
     debugLog('info', 'Starting refinement generation', {
         iteration: state.iterationCount + 1,
         character: state.character.name,
         promptLength: processedPrompt.length,
     });
 
-    // Refinement doesn't use structured output - we want free-form character card
+    // Refinement doesn't use structured output
     return await executeGeneration(
-        settings.systemPrompt,
+        systemPrompt,
         processedPrompt,
         null,
         signal,
@@ -208,7 +205,6 @@ function validateStructuredResponse(
                     missing,
                     schemaName: schema.name,
                 });
-                // Return as unstructured rather than failing
                 return {
                     success: true,
                     response,
@@ -217,7 +213,6 @@ function validateStructuredResponse(
             }
         }
 
-        // Valid structured response
         return {
             success: true,
             response,
@@ -230,7 +225,6 @@ function validateStructuredResponse(
             responsePreview: response.substring(0, 200),
         });
 
-        // Fall back to unstructured rather than failing
         return {
             success: true,
             response,
@@ -268,7 +262,6 @@ async function executeGeneration(
             );
         }
 
-        // Check abort after generation
         if (signal?.aborted) {
             return { success: false, error: 'Generation cancelled' };
         }
@@ -289,7 +282,6 @@ async function executeGeneration(
             isStructured: !!jsonSchema,
         };
     } catch (err) {
-        // Handle abort errors gracefully
         if ((err as Error).name === 'AbortError' || signal?.aborted) {
             debugLog('info', 'Generation aborted', null);
             return { success: false, error: 'Generation cancelled' };
@@ -319,7 +311,6 @@ async function generateWithCurrentSettings(
 ): Promise<string> {
     const { generateRaw, substituteParams } = SillyTavern.getContext();
 
-    // Run ST's macro substitution on system prompt
     const processedSystemPrompt = substituteParams(systemPrompt);
 
     debugLog('request', 'generateRaw request', {
@@ -369,7 +360,6 @@ async function generateWithCustomSettings(
     const settings = getSettings();
     const config = settings.generationConfig;
 
-    // Run ST's macro substitution on system prompt
     const processedSystemPrompt = substituteParams(systemPrompt);
 
     const requestOptions: Record<string, unknown> = {
@@ -412,7 +402,6 @@ async function generateWithCustomSettings(
 
     let response: string;
 
-    // When stream: true, result is a generator function - consume it
     if (typeof result === 'function') {
         response = await consumeStreamGenerator(result, signal);
     } else if (result && typeof result === 'object') {
@@ -450,10 +439,8 @@ async function consumeStreamGenerator(
         generator = generatorFn();
 
         for await (const chunk of generator) {
-            // Check abort during streaming
             if (signal?.aborted) {
                 debugLog('info', 'Stream aborted', { textSoFar: finalText.length });
-                // Try to close the generator gracefully before throwing
                 try {
                     await generator.return(undefined);
                 } catch {
@@ -482,7 +469,6 @@ async function consumeStreamGenerator(
             textSoFar: finalText.length,
         });
 
-        // Try to close the generator on error
         if (generator) {
             try {
                 await generator.return(undefined);
@@ -491,7 +477,6 @@ async function consumeStreamGenerator(
             }
         }
 
-        // Return partial response if we have one
         if (finalText) {
             debugLog('info', 'Returning partial response after stream error', {
                 length: finalText.length,
@@ -506,7 +491,6 @@ async function consumeStreamGenerator(
     return finalText;
 }
 
-
 // ============================================================================
 // TOKEN ESTIMATION
 // ============================================================================
@@ -519,7 +503,6 @@ export async function getStageTokenCount(
     stage: StageName,
 ): Promise<{ promptTokens: number; contextSize: number; percentage: number } | null> {
     const { getTokenCountAsync, maxContext } = SillyTavern.getContext();
-    const settings = getSettings();
 
     if (!state.character) return null;
 
@@ -527,7 +510,8 @@ export async function getStageTokenCount(
         const prompt = buildStagePrompt(state, stage);
         if (!prompt) return null;
 
-        const fullPrompt = settings.systemPrompt + '\n\n' + prompt;
+        const systemPrompt = getFullSystemPrompt(stage);
+        const fullPrompt = systemPrompt + '\n\n' + prompt;
         const promptTokens = await getTokenCountAsync(fullPrompt);
         const percentage = Math.round((promptTokens / maxContext) * 100);
 
@@ -549,7 +533,6 @@ export async function getRefinementTokenCount(
     state: PipelineState,
 ): Promise<{ promptTokens: number; contextSize: number; percentage: number } | null> {
     const { getTokenCountAsync, maxContext } = SillyTavern.getContext();
-    const settings = getSettings();
 
     if (!state.character || !state.results.rewrite || !state.results.analyze) return null;
 
@@ -557,7 +540,8 @@ export async function getRefinementTokenCount(
         const prompt = buildRefinementPrompt(state);
         if (!prompt) return null;
 
-        const fullPrompt = settings.systemPrompt + '\n\n' + prompt;
+        const systemPrompt = getFullSystemPrompt('rewrite');
+        const fullPrompt = systemPrompt + '\n\n' + prompt;
         const promptTokens = await getTokenCountAsync(fullPrompt);
         const percentage = Math.round((promptTokens / maxContext) * 100);
 
@@ -594,7 +578,6 @@ function ensureString(value: unknown): string {
 
 /**
  * Replace {{char}} and {{user}} placeholders with actual names.
- * This is needed because we're not in a chat context where ST auto-substitutes.
  */
 function substituteCharacterPlaceholders(
     text: string,

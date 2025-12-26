@@ -13,14 +13,13 @@ import type {
     StructuredOutputSchema,
     IterationSnapshot,
     IterationVerdict,
-    ParsedRewrite,
-    ParsedRewriteField,
+    FieldSelection,
 } from './types';
 import { STAGES, CHARACTER_FIELDS, MAX_ITERATION_HISTORY } from './constants';
 import { createStageConfigFromDefaults, resolvePrompt, resolveSchema, processPromptTemplate, promptHasPlaceholders } from './presets';
-import { getSettings } from './settings';
+import { getFullRefinementInstructions } from './settings';
 import { debugLog, logError } from './debug';
-import { getPopulatedFields, buildCharacterSummary } from './character';
+import { getPopulatedFields, buildCharacterSummaryFromSelection } from './character';
 
 // ============================================================================
 // PIPELINE STATE FACTORY
@@ -46,7 +45,7 @@ export function createPipelineState(): PipelineState {
             analyze: createStageConfigFromDefaults('analyze'),
         },
 
-        selectedStages: ['score', 'rewrite'],  // Default pipeline
+        selectedStages: ['score', 'rewrite'],
         currentStage: null,
         stageStatus: {
             score: 'pending',
@@ -54,10 +53,11 @@ export function createPipelineState(): PipelineState {
             analyze: 'pending',
         },
 
-        // Iteration system
         iterationCount: 0,
         iterationHistory: [],
         isRefining: false,
+
+        selectedFields: {},
 
         exportData: null,
     };
@@ -72,10 +72,74 @@ export function resetPipeline(state: PipelineState, keepCharacter: boolean = fal
     if (keepCharacter && state.character) {
         fresh.character = state.character;
         fresh.characterIndex = state.characterIndex;
+        fresh.selectedFields = state.selectedFields;
     }
 
     debugLog('state', 'Pipeline reset', { keepCharacter, hasCharacter: !!fresh.character });
     return fresh;
+}
+
+// ============================================================================
+// FIELD SELECTION
+// ============================================================================
+
+/**
+ * Initialize field selection when character is set.
+ * Defaults: all populated fields selected, all alt_greetings indices selected.
+ */
+export function initializeFieldSelection(char: Character): FieldSelection {
+    const populated = getPopulatedFields(char);
+    const selection: FieldSelection = {};
+
+    for (const field of populated) {
+        if (field.key === 'alternate_greetings' && Array.isArray(field.rawValue)) {
+            // Select all greetings by default
+            selection[field.key] = (field.rawValue as string[]).map((_, i) => i);
+        } else {
+            selection[field.key] = true;
+        }
+    }
+
+    return selection;
+}
+
+/**
+ * Update selection for a single field.
+ */
+export function updateFieldSelection(
+    state: PipelineState,
+    fieldKey: string,
+    value: boolean | number[],
+): PipelineState {
+    return {
+        ...state,
+        selectedFields: {
+            ...state.selectedFields,
+            [fieldKey]: value,
+        },
+    };
+}
+
+/**
+ * Select all fields for current character.
+ */
+export function selectAllFields(state: PipelineState): PipelineState {
+    if (!state.character) return state;
+
+    return {
+        ...state,
+        selectedFields: initializeFieldSelection(state.character),
+    };
+}
+
+/**
+ * Deselect all fields.
+ */
+export function deselectAllFields(state: PipelineState): PipelineState {
+    return {
+        ...state,
+        selectedFields: {},
+    };
 }
 
 // ============================================================================
@@ -95,7 +159,6 @@ export function setCharacter(state: PipelineState, character: Character | null, 
         ...state,
         character,
         characterIndex: index,
-        // Reset results when character changes
         results: {
             score: null,
             rewrite: null,
@@ -107,10 +170,10 @@ export function setCharacter(state: PipelineState, character: Character | null, 
             analyze: 'pending',
         },
         currentStage: null,
-        // Reset iteration state
         iterationCount: 0,
         iterationHistory: [],
         isRefining: false,
+        selectedFields: character ? initializeFieldSelection(character) : {},
         exportData: null,
     };
 
@@ -154,7 +217,6 @@ export function toggleStage(state: PipelineState, stage: StageName): PipelineSta
  * Set all selected stages at once
  */
 export function setSelectedStages(state: PipelineState, stages: StageName[]): PipelineState {
-    // Maintain order based on STAGES constant
     const orderedSelected = STAGES.filter(s => stages.includes(s));
 
     return {
@@ -181,15 +243,20 @@ export function canRunStage(state: PipelineState, stage: StageName): { canRun: b
         return { canRun: false, reason: 'No character selected' };
     }
 
-    // Check stage-specific dependencies
+    // Check if any fields are selected
+    const hasSelectedFields = Object.values(state.selectedFields).some(v =>
+        v === true || (Array.isArray(v) && v.length > 0),
+    );
+
+    if (!hasSelectedFields) {
+        return { canRun: false, reason: 'No fields selected' };
+    }
+
     switch (stage) {
         case 'score':
-            // Score can always run if we have a character
             return { canRun: true };
 
         case 'rewrite':
-            // Rewrite can run standalone OR with score results
-            // If score is in selected stages and not complete, warn but allow
             if (state.selectedStages.includes('score') && !state.results.score?.locked) {
                 return {
                     canRun: true,
@@ -199,7 +266,6 @@ export function canRunStage(state: PipelineState, stage: StageName): { canRun: b
             return { canRun: true };
 
         case 'analyze':
-            // Analyze needs rewrite results to compare
             if (!state.results.rewrite) {
                 return { canRun: false, reason: 'Analyze requires rewrite results to compare' };
             }
@@ -306,7 +372,6 @@ export function completeStage(
         isStructured: result.isStructured,
     });
 
-    // If this is analyze completing, we're now in refinement mode
     const isRefining = stage === 'analyze' && state.results.rewrite !== null;
 
     return {
@@ -426,7 +491,6 @@ export function clearStageResult(state: PipelineState, stage: StageName): Pipeli
 export function extractVerdict(analysisResponse: string): IterationVerdict {
     const upper = analysisResponse.toUpperCase();
 
-    // Check for explicit verdict markers
     if (upper.includes('VERDICT') || upper.includes('"VERDICT"')) {
         if (upper.includes('ACCEPT') && !upper.includes('NEEDS')) {
             return 'accept';
@@ -439,7 +503,6 @@ export function extractVerdict(analysisResponse: string): IterationVerdict {
         }
     }
 
-    // Fallback heuristics
     if (upper.includes('READY TO USE') || upper.includes('NO MORE ITERATIONS')) {
         return 'accept';
     }
@@ -447,7 +510,6 @@ export function extractVerdict(analysisResponse: string): IterationVerdict {
         return 'regression';
     }
 
-    // Default to needs refinement if we have any issues mentioned
     if (upper.includes('ISSUE') || upper.includes('PROBLEM') || upper.includes('SHOULD FIX')) {
         return 'needs_refinement';
     }
@@ -478,9 +540,6 @@ export function createIterationSnapshot(state: PipelineState): IterationSnapshot
 
 /**
  * Start a refinement iteration
- * - Snapshots current state
- * - Clears analyze result
- * - Increments iteration count
  */
 export function startRefinement(state: PipelineState): PipelineState {
     const snapshot = createIterationSnapshot(state);
@@ -490,7 +549,6 @@ export function startRefinement(state: PipelineState): PipelineState {
         return state;
     }
 
-    // Add snapshot to history, trim if needed
     const newHistory = [...state.iterationHistory, snapshot];
     if (newHistory.length > MAX_ITERATION_HISTORY) {
         newHistory.shift();
@@ -505,7 +563,6 @@ export function startRefinement(state: PipelineState): PipelineState {
         ...state,
         iterationHistory: newHistory,
         iterationCount: state.iterationCount + 1,
-        // Clear analyze so user must re-analyze after refinement
         results: {
             ...state.results,
             analyze: null,
@@ -520,7 +577,6 @@ export function startRefinement(state: PipelineState): PipelineState {
 
 /**
  * Complete a refinement (new rewrite generated)
- * The refinement result replaces the current rewrite
  */
 export function completeRefinement(
     state: PipelineState,
@@ -543,7 +599,6 @@ export function completeRefinement(
         results: {
             ...state.results,
             rewrite: stageResult,
-            // analyze stays null - user must run it
         },
         stageStatus: {
             ...state.stageStatus,
@@ -566,7 +621,6 @@ export function revertToIteration(state: PipelineState, iterationIndex: number):
 
     debugLog('state', 'Reverting to iteration', { iteration: snapshot.iteration });
 
-    // Restore the rewrite from that iteration
     const restoredRewrite: StageResult = {
         response: snapshot.rewriteResponse,
         isStructured: false,
@@ -576,7 +630,6 @@ export function revertToIteration(state: PipelineState, iterationIndex: number):
         locked: false,
     };
 
-    // Trim history to that point
     const trimmedHistory = state.iterationHistory.slice(0, iterationIndex);
 
     return {
@@ -621,256 +674,268 @@ export function acceptRewrite(state: PipelineState): PipelineState {
 }
 
 // ============================================================================
-// REWRITE PARSING
+// PROMPT BUILDING
 // ============================================================================
 
 /**
- * Parse a rewrite response into field key/value pairs.
- * Supports multiple formats with fallback chain:
- * 1. JSON object with field keys
- * 2. Markdown headers (### Field Name)
- * 3. Heuristic field detection
- * 4. Raw content as single field
+ * Build the complete prompt for a stage.
+ * Always includes required data, with deduplication if user used placeholders.
  */
-export function parseRewriteResponse(response: string): ParsedRewrite {
-    // Try JSON first
-    const jsonResult = tryParseAsJson(response);
-    if (jsonResult) {
-        return jsonResult;
-    }
+export function buildStagePrompt(state: PipelineState, stage: StageName): string | null {
+    if (!state.character) return null;
 
-    // Try markdown headers
-    const markdownResult = tryParseAsMarkdown(response);
-    if (markdownResult) {
-        return markdownResult;
-    }
+    const config = state.configs[stage];
+    const userPrompt = resolvePrompt(config);
+    if (!userPrompt.trim()) return null;
 
-    // Try heuristic detection
-    const heuristicResult = tryParseWithHeuristics(response);
-    if (heuristicResult) {
-        return heuristicResult;
-    }
+    // Check which placeholders user included
+    const usedPlaceholders = promptHasPlaceholders(userPrompt);
 
-    // Fallback: return raw content
-    return {
-        fields: [{
-            key: 'content',
-            label: 'Content',
-            value: response.trim(),
-        }],
-        raw: response,
-        parseMethod: 'raw',
+    // Build character summary from selected fields
+    const characterSummary = buildCharacterSummaryFromSelection(
+        state.character,
+        state.selectedFields,
+    );
+
+    // Build context for placeholder substitution
+    const { name1 } = SillyTavern.getContext();
+    const context = {
+        originalCharacter: characterSummary,
+        scoreResults: state.results.score?.response || '',
+        rewriteResults: state.results.rewrite?.response || '',
+        currentRewrite: state.results.rewrite?.response || '',
+        currentAnalysis: state.results.analyze?.response || '',
+        iterationNumber: String(state.iterationCount + 1),
+        charName: state.character.name,
+        userName: name1 || 'User',
     };
+
+    // Substitute any placeholders in user's prompt
+    const processedUserPrompt = processPromptTemplate(userPrompt, context);
+
+    // Build data sections, SKIPPING what user already included via placeholders
+    const dataSections: string[] = [];
+
+    // Character data (always needed for all stages)
+    if (!usedPlaceholders.includes('ORIGINAL_CHARACTER')) {
+        dataSections.push(`## Character\n\n${characterSummary}`);
+    }
+
+    // Score results (for rewrite and analyze stages)
+    if (stage !== 'score' && state.results.score?.response) {
+        if (!usedPlaceholders.includes('SCORE_RESULTS')) {
+            dataSections.push(`## Score Feedback\n\n${state.results.score.response}`);
+        }
+    }
+
+    // Rewrite results (for analyze stage)
+    if (stage === 'analyze' && state.results.rewrite?.response) {
+        const hasRewritePlaceholder =
+            usedPlaceholders.includes('REWRITE_RESULTS') ||
+            usedPlaceholders.includes('CURRENT_REWRITE');
+
+        if (!hasRewritePlaceholder) {
+            dataSections.push(`## Rewritten Version\n\n${state.results.rewrite.response}`);
+        }
+    }
+
+    // Assemble final prompt
+    const parts: string[] = [];
+
+    if (dataSections.length > 0) {
+        parts.push('# Input Data\n');
+        parts.push(dataSections.join('\n\n---\n\n'));
+        parts.push('\n\n---\n');
+    }
+
+    parts.push('# Instructions\n\n');
+    parts.push(processedUserPrompt);
+
+    return parts.join('');
 }
 
-function tryParseAsJson(response: string): ParsedRewrite | null {
-    try {
-        // Try direct parse
-        let parsed: Record<string, unknown>;
-        try {
-            parsed = JSON.parse(response);
-        } catch {
-            // Try extracting from code block
-            const codeBlockMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
-            if (!codeBlockMatch) return null;
-            parsed = JSON.parse(codeBlockMatch[1].trim());
-        }
-
-        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-            return null;
-        }
-
-        const fields: ParsedRewriteField[] = [];
-
-        for (const [key, value] of Object.entries(parsed)) {
-            if (typeof value === 'string' && value.trim()) {
-                const fieldDef = CHARACTER_FIELDS.find(f =>
-                    f.key === key || f.label.toLowerCase() === key.toLowerCase(),
-                );
-
-                fields.push({
-                    key: fieldDef?.key || key,
-                    label: fieldDef?.label || formatFieldLabel(key),
-                    value: value.trim(),
-                });
-            }
-        }
-
-        if (fields.length === 0) return null;
-
-        return {
-            fields,
-            raw: response,
-            parseMethod: 'json',
-        };
-    } catch {
+/**
+ * Build the refinement prompt with deduplication.
+ */
+export function buildRefinementPrompt(state: PipelineState): string | null {
+    if (!state.character || !state.results.rewrite || !state.results.analyze) {
         return null;
     }
-}
 
-function tryParseAsMarkdown(response: string): ParsedRewrite | null {
-    // Match ### Header or ## Header patterns
-    const headerPattern = /^#{2,3}\s+(.+?)$/gm;
-    const matches = [...response.matchAll(headerPattern)];
+    // Get refinement instructions (base + user)
+    const userPrompt = getFullRefinementInstructions();
 
-    if (matches.length === 0) return null;
+    // Check which placeholders user included
+    const usedPlaceholders = promptHasPlaceholders(userPrompt);
 
-    const fields: ParsedRewriteField[] = [];
+    // Build character summary from selected fields
+    const characterSummary = buildCharacterSummaryFromSelection(
+        state.character,
+        state.selectedFields,
+    );
 
-    for (let i = 0; i < matches.length; i++) {
-        const match = matches[i];
-        const headerText = match[1].trim();
-        const startIndex = match.index! + match[0].length;
-        const endIndex = matches[i + 1]?.index ?? response.length;
-        const content = response.slice(startIndex, endIndex).trim();
+    const { name1 } = SillyTavern.getContext();
+    const context = {
+        originalCharacter: characterSummary,
+        scoreResults: state.results.score?.response || '',
+        rewriteResults: state.results.rewrite.response,
+        currentRewrite: state.results.rewrite.response,
+        currentAnalysis: state.results.analyze.response,
+        iterationNumber: String(state.iterationCount + 1),
+        charName: state.character.name,
+        userName: name1 || 'User',
+    };
 
-        if (!content) continue;
+    // Substitute placeholders
+    const processedUserPrompt = processPromptTemplate(userPrompt, context);
 
-        // Try to match header to known field
-        const fieldDef = CHARACTER_FIELDS.find(f =>
-            f.label.toLowerCase() === headerText.toLowerCase() ||
-            f.key === headerText.toLowerCase().replace(/\s+/g, '_'),
-        );
+    // Build data sections with deduplication
+    const dataSections: string[] = [];
 
-        // Skip non-character fields like "Summary" or "Notes"
-        const skipHeaders = ['summary', 'notes', 'changes', 'revised', 'original'];
-        if (!fieldDef && skipHeaders.some(s => headerText.toLowerCase().includes(s))) {
-            continue;
-        }
-
-        fields.push({
-            key: fieldDef?.key || headerText.toLowerCase().replace(/\s+/g, '_'),
-            label: fieldDef?.label || headerText,
-            value: content,
-        });
+    if (!usedPlaceholders.includes('ORIGINAL_CHARACTER')) {
+        dataSections.push(`## Original Character (Ground Truth)\n\n${characterSummary}`);
     }
 
-    if (fields.length === 0) return null;
+    const hasRewritePlaceholder =
+        usedPlaceholders.includes('CURRENT_REWRITE') ||
+        usedPlaceholders.includes('REWRITE_RESULTS');
 
-    return {
-        fields,
-        raw: response,
-        parseMethod: 'markdown',
-    };
-}
-
-function tryParseWithHeuristics(response: string): ParsedRewrite | null {
-    const fields: ParsedRewriteField[] = [];
-
-    // Look for patterns like "Description:" or "**Description:**"
-    for (const fieldDef of CHARACTER_FIELDS) {
-        const patterns = [
-            new RegExp(`\\*\\*${fieldDef.label}:\\*\\*\\s*([\\s\\S]*?)(?=\\*\\*[A-Z]|$)`, 'i'),
-            new RegExp(`${fieldDef.label}:\\s*([\\s\\S]*?)(?=\\n[A-Z][a-z]+:|$)`, 'i'),
-            new RegExp(`\\[${fieldDef.label}\\]\\s*([\\s\\S]*?)(?=\\[[A-Z]|$)`, 'i'),
-        ];
-
-        for (const pattern of patterns) {
-            const match = response.match(pattern);
-            if (match && match[1].trim()) {
-                fields.push({
-                    key: fieldDef.key,
-                    label: fieldDef.label,
-                    value: match[1].trim(),
-                });
-                break;
-            }
-        }
+    if (!hasRewritePlaceholder) {
+        dataSections.push(`## Current Rewrite (Iteration ${state.iterationCount + 1})\n\n${state.results.rewrite.response}`);
     }
 
-    if (fields.length === 0) return null;
+    if (!usedPlaceholders.includes('CURRENT_ANALYSIS')) {
+        dataSections.push(`## Analysis of Current Rewrite\n\n${state.results.analyze.response}`);
+    }
 
-    return {
-        fields,
-        raw: response,
-        parseMethod: 'heuristic',
-    };
+    if (state.results.score?.response && !usedPlaceholders.includes('SCORE_RESULTS')) {
+        dataSections.push(`## Original Score Feedback\n\n${state.results.score.response}`);
+    }
+
+    // Assemble
+    const parts: string[] = [];
+
+    if (dataSections.length > 0) {
+        parts.push('# Input Data\n');
+        parts.push(dataSections.join('\n\n---\n\n'));
+        parts.push('\n\n---\n');
+    }
+
+    parts.push('# Refinement Instructions\n\n');
+    parts.push(processedUserPrompt);
+
+    return parts.join('');
 }
 
-function formatFieldLabel(key: string): string {
-    return key
-        .replace(/_/g, ' ')
-        .replace(/([a-z])([A-Z])/g, '$1 $2')
-        .replace(/\b\w/g, c => c.toUpperCase());
+/**
+ * Get the schema for a stage (if structured output is enabled)
+ */
+export function getStageSchema(state: PipelineState, stage: StageName): StructuredOutputSchema | null {
+    const config = state.configs[stage];
+    return resolveSchema(config);
 }
 
 // ============================================================================
-// APPLY REWRITE TO CHARACTER
+// EXPORT
 // ============================================================================
 
 /**
- * Apply parsed rewrite fields to a character.
- * Returns the updated character data or null on failure.
+ * Generate export data from pipeline results
  */
-export async function applyRewriteToCharacter(
-    state: PipelineState,
-    parsedFields: ParsedRewriteField[],
-): Promise<{ success: boolean; error?: string; updatedFields: string[] }> {
-    if (!state.character || state.characterIndex === null) {
-        return { success: false, error: 'No character selected', updatedFields: [] };
+export function generateExportData(state: PipelineState): string | null {
+    if (!state.results.rewrite || !state.character) {
+        return null;
     }
 
-    const { characters, unshallowCharacter, getRequestHeaders } = SillyTavern.getContext();
+    const { moment } = SillyTavern.libs;
 
-    try {
-        // Ensure character data is fully loaded
-        await unshallowCharacter(state.characterIndex);
+    const exportLines = [
+        '<!-- CharacterTools Export v1 -->',
+        '',
+        `# ${state.character.name} - Character Tools Session`,
+        '',
+        `**Exported:** ${moment().format('YYYY-MM-DD HH:mm:ss')}`,
+        `**Iterations:** ${state.iterationCount}`,
+        '',
+    ];
 
-        // Get fresh character reference after unshallow
-        const charList = characters as Character[];
-        const character = charList[state.characterIndex];
-
-        if (!character) {
-            return { success: false, error: 'Character not found after unshallow', updatedFields: [] };
+    // Selected fields
+    exportLines.push('## Fields Included');
+    exportLines.push('');
+    for (const [key, value] of Object.entries(state.selectedFields)) {
+        if (value === true) {
+            const field = CHARACTER_FIELDS.find(f => f.key === key);
+            exportLines.push(`- ${field?.label || key}`);
+        } else if (Array.isArray(value) && value.length > 0) {
+            const field = CHARACTER_FIELDS.find(f => f.key === key);
+            exportLines.push(`- ${field?.label || key} (items: ${value.map(i => i + 1).join(', ')})`);
         }
-
-        // Build update object
-        const updates: Partial<Character> = {};
-        const updatedFields: string[] = [];
-
-        for (const field of parsedFields) {
-            // Only update known character fields
-            const fieldDef = CHARACTER_FIELDS.find(f => f.key === field.key);
-            if (fieldDef && field.value.trim()) {
-                (updates as Record<string, string>)[field.key] = field.value.trim();
-                updatedFields.push(field.label);
-            }
-        }
-
-        if (updatedFields.length === 0) {
-            return { success: false, error: 'No valid fields to update', updatedFields: [] };
-        }
-
-        // Apply updates to character object
-        Object.assign(character, updates);
-
-        // Save to server
-        const saveResponse = await fetch('/api/characters/edit', {
-            method: 'POST',
-            headers: getRequestHeaders(),
-            body: JSON.stringify({
-                avatar_url: character.avatar,
-                ...character,
-            }),
-        });
-
-        if (!saveResponse.ok) {
-            const errorText = await saveResponse.text();
-            logError('Failed to save character', { status: saveResponse.status, error: errorText });
-            return { success: false, error: `Save failed: ${saveResponse.status}`, updatedFields: [] };
-        }
-
-        debugLog('info', 'Character updated successfully', {
-            name: character.name,
-            updatedFields,
-        });
-
-        return { success: true, updatedFields };
-    } catch (e) {
-        const message = e instanceof TypeError ? 'Network error - check your connection' : (e as Error).message;
-        logError('Error applying rewrite to character', e);
-        return { success: false, error: message, updatedFields: [] };
     }
+    exportLines.push('');
+
+    // Results
+    if (state.results.score) {
+        exportLines.push('---');
+        exportLines.push('');
+        exportLines.push('## Score Results');
+        exportLines.push('');
+        exportLines.push(state.results.score.response);
+        exportLines.push('');
+    }
+
+    if (state.results.rewrite) {
+        exportLines.push('---');
+        exportLines.push('');
+        exportLines.push('## Rewrite Results');
+        exportLines.push('');
+        exportLines.push(state.results.rewrite.response);
+        exportLines.push('');
+    }
+
+    if (state.results.analyze) {
+        exportLines.push('---');
+        exportLines.push('');
+        exportLines.push('## Analysis Results');
+        exportLines.push('');
+        exportLines.push(state.results.analyze.response);
+        exportLines.push('');
+    }
+
+    // Iteration history
+    if (state.iterationHistory.length > 0) {
+        exportLines.push('---');
+        exportLines.push('');
+        exportLines.push('## Iteration History');
+        exportLines.push('');
+
+        for (const snap of state.iterationHistory) {
+            exportLines.push(`### Iteration ${snap.iteration + 1} - ${snap.verdict.toUpperCase()}`);
+            exportLines.push(`*${moment(snap.timestamp).format('YYYY-MM-DD HH:mm:ss')}*`);
+            exportLines.push('');
+            exportLines.push('#### Rewrite');
+            exportLines.push('');
+            exportLines.push(snap.rewriteResponse);
+            exportLines.push('');
+            exportLines.push('#### Analysis');
+            exportLines.push('');
+            exportLines.push(snap.analysisResponse);
+            exportLines.push('');
+        }
+    }
+
+    return exportLines.join('\n');
+}
+
+/**
+ * Set export data in state
+ */
+export function setExportData(state: PipelineState): PipelineState {
+    const exportData = generateExportData(state);
+
+    return {
+        ...state,
+        exportData,
+    };
 }
 
 // ============================================================================
@@ -926,237 +991,7 @@ export function isPipelineComplete(state: PipelineState): boolean {
  * Check if pipeline is ready for export
  */
 export function canExport(state: PipelineState): boolean {
-    // Need at least rewrite results to export
     return !!state.results.rewrite;
-}
-
-// ============================================================================
-// PROMPT BUILDING
-// ============================================================================
-
-/**
- * Build the complete prompt for a stage, including template substitution.
- * If no placeholders are detected, prepends character data automatically.
- */
-export function buildStagePrompt(state: PipelineState, stage: StageName): string | null {
-    if (!state.character) {
-        return null;
-    }
-
-    const config = state.configs[stage];
-    const basePrompt = resolvePrompt(config);
-
-    if (!basePrompt.trim()) {
-        return null;
-    }
-
-    // Build character summary
-    const characterSummary = buildCharacterSummary(state.character);
-
-    // Build template context with all available data
-    const { name1 } = SillyTavern.getContext();
-
-    const context = {
-        originalCharacter: characterSummary,
-        scoreResults: state.results.score?.response || '',
-        rewriteResults: state.results.rewrite?.response || '',
-        currentRewrite: state.results.rewrite?.response || '',
-        currentAnalysis: state.results.analyze?.response || '',
-        iterationNumber: String(state.iterationCount + 1),
-        charName: state.character.name,
-        userName: name1 || 'User',
-    };
-
-    // Check which placeholders are used in the prompt
-    const foundPlaceholders = promptHasPlaceholders(basePrompt);
-    const hasAnyPlaceholder = foundPlaceholders.length > 0;
-
-    // Process template placeholders in the prompt
-    const processedPrompt = processPromptTemplate(basePrompt, context);
-
-    // If prompt has placeholders, trust that user knows what they're doing
-    if (hasAnyPlaceholder) {
-        // But still check if critical data is missing
-        const usesCharacterPlaceholder = foundPlaceholders.includes('ORIGINAL_CHARACTER');
-
-        // If they use character placeholder, just return processed prompt
-        if (usesCharacterPlaceholder) {
-            return processedPrompt;
-        }
-
-        // If they use other placeholders but not character, prepend character data
-        return buildStructuredPrompt(stage, state, characterSummary, processedPrompt);
-    }
-
-    // No placeholders detected - prepend all relevant data automatically
-    debugLog('info', 'No placeholders in prompt, auto-prepending character data', { stage });
-    return buildStructuredPrompt(stage, state, characterSummary, processedPrompt);
-}
-
-/**
- * Build the refinement prompt
- */
-export function buildRefinementPrompt(state: PipelineState): string | null {
-    if (!state.character || !state.results.rewrite || !state.results.analyze) {
-        return null;
-    }
-
-    const settings = getSettings();
-    const basePrompt = settings.refinementPrompt;
-
-    const characterSummary = buildCharacterSummary(state.character);
-    const { name1 } = SillyTavern.getContext();
-
-    const context = {
-        originalCharacter: characterSummary,
-        scoreResults: state.results.score?.response || '',
-        rewriteResults: state.results.rewrite.response,
-        currentRewrite: state.results.rewrite.response,
-        currentAnalysis: state.results.analyze.response,
-        iterationNumber: String(state.iterationCount + 1),
-        charName: state.character.name,
-        userName: name1 || 'User',
-    };
-
-    return processPromptTemplate(basePrompt, context);
-}
-
-/**
- * Build a structured prompt with all relevant data prepended
- */
-function buildStructuredPrompt(
-    stage: StageName,
-    state: PipelineState,
-    characterSummary: string,
-    instructions: string,
-): string {
-    const parts: string[] = [];
-
-    // Always include character
-    const stageAction = stage === 'score' ? 'Analyze' : stage === 'rewrite' ? 'Rewrite' : 'Compare';
-    parts.push(`# Character to ${stageAction}`, '', characterSummary);
-
-    // Stage-specific data
-    switch (stage) {
-        case 'score':
-            // Score only needs character - already added above
-            break;
-
-        case 'rewrite':
-            // Include score results if available
-            if (state.results.score?.response) {
-                parts.push('', '---', '', '# Score Feedback', '', 'Use this feedback to guide your rewrite:', '', state.results.score.response);
-            }
-            break;
-
-        case 'analyze':
-            // Include rewrite results
-            if (state.results.rewrite?.response) {
-                parts.push('', '---', '', '# Rewritten Version', '', 'Compare this against the original:', '', state.results.rewrite.response);
-            }
-
-            // Include score results if available
-            if (state.results.score?.response) {
-                parts.push('', '---', '', '# Original Score Feedback', '', 'Reference for what was identified as needing improvement:', '', state.results.score.response);
-            }
-            break;
-    }
-
-    // Add the instructions/prompt
-    parts.push('', '---', '', '# Instructions', '', instructions);
-
-    return parts.join('\n');
-}
-
-/**
- * Get the schema for a stage (if structured output is enabled)
- */
-export function getStageSchema(state: PipelineState, stage: StageName): StructuredOutputSchema | null {
-    const config = state.configs[stage];
-    return resolveSchema(config);
-}
-
-// ============================================================================
-// EXPORT
-// ============================================================================
-
-/**
- * Generate export data from rewrite results
- */
-export function generateExportData(state: PipelineState): string | null {
-    if (!state.results.rewrite || !state.character) {
-        return null;
-    }
-
-    const rewriteResponse = state.results.rewrite.response;
-
-    const exportLines = [
-        `# ${state.character.name} (Rewritten)`,
-        '',
-        `Generated: ${new Date().toLocaleString()}`,
-        `Iterations: ${state.iterationCount}`,
-        '',
-        '---',
-        '',
-        rewriteResponse,
-    ];
-
-    // If we have analyze results, include them as notes
-    if (state.results.analyze) {
-        exportLines.push(
-            '',
-            '---',
-            '',
-            '## Final Analysis',
-            '',
-            state.results.analyze.response,
-        );
-    }
-
-    // If we have score results, include summary
-    if (state.results.score) {
-        exportLines.push(
-            '',
-            '---',
-            '',
-            '## Original Score',
-            '',
-            state.results.score.response,
-        );
-    }
-
-    // Include iteration history summary if we have any
-    if (state.iterationHistory.length > 0) {
-        exportLines.push(
-            '',
-            '---',
-            '',
-            '## Iteration History',
-            '',
-        );
-
-        for (const snap of state.iterationHistory) {
-            exportLines.push(
-                `### Iteration ${snap.iteration + 1} - ${snap.verdict.toUpperCase()}`,
-                `${new Date(snap.timestamp).toLocaleString()}`,
-                '',
-            );
-        }
-    }
-
-    return exportLines.join('\n');
-}
-
-/**
- * Set export data in state
- */
-export function setExportData(state: PipelineState): PipelineState {
-    const exportData = generateExportData(state);
-
-    return {
-        ...state,
-        exportData,
-    };
 }
 
 // ============================================================================
@@ -1241,17 +1076,23 @@ export function validatePipeline(state: PipelineState): PipelineValidation {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    // Must have character
     if (!state.character) {
         errors.push('No character selected');
     }
 
-    // Must have at least one stage selected
     if (state.selectedStages.length === 0) {
         errors.push('No stages selected');
     }
 
-    // Check each selected stage
+    // Check if any fields are selected
+    const hasSelectedFields = Object.values(state.selectedFields).some(v =>
+        v === true || (Array.isArray(v) && v.length > 0),
+    );
+
+    if (!hasSelectedFields) {
+        errors.push('No fields selected');
+    }
+
     for (const stage of state.selectedStages) {
         const config = state.configs[stage];
         const prompt = resolvePrompt(config);
@@ -1260,7 +1101,6 @@ export function validatePipeline(state: PipelineState): PipelineValidation {
             errors.push(`${stage}: No prompt configured`);
         }
 
-        // Warn about missing dependencies (but don't error - we auto-include now)
         if (stage === 'rewrite' && !state.results.score && state.selectedStages.includes('score')) {
             warnings.push('Rewrite will run without score feedback (score not complete)');
         }
@@ -1270,7 +1110,6 @@ export function validatePipeline(state: PipelineState): PipelineValidation {
         }
     }
 
-    // Check API readiness
     const { onlineStatus } = SillyTavern.getContext();
     if (onlineStatus !== 'Valid' && onlineStatus !== 'Connected') {
         errors.push('API is not connected');
@@ -1302,13 +1141,11 @@ export function validateRefinement(state: PipelineState): PipelineValidation {
         errors.push('Run analyze first to identify issues');
     }
 
-    // Check API readiness
     const { onlineStatus } = SillyTavern.getContext();
     if (onlineStatus !== 'Valid' && onlineStatus !== 'Connected') {
         errors.push('API is not connected');
     }
 
-    // Warn if last verdict was accept
     const lastSnapshot = state.iterationHistory.length > 0
         ? state.iterationHistory[state.iterationHistory.length - 1]
         : null;
@@ -1329,7 +1166,7 @@ export function validateRefinement(state: PipelineState): PipelineValidation {
 }
 
 // ============================================================================
-// SERIALIZATION (for potential future persistence)
+// SERIALIZATION
 // ============================================================================
 
 /**
@@ -1345,13 +1182,13 @@ export function serializePipelineState(state: PipelineState): Record<string, unk
         iterationCount: state.iterationCount,
         iterationHistory: state.iterationHistory,
         isRefining: state.isRefining,
+        selectedFields: state.selectedFields,
         exportData: state.exportData,
-        // Don't serialize character - will be re-fetched by index
     };
 }
 
 /**
- * Deserialize pipeline state (would need character list to restore character)
+ * Deserialize pipeline state
  */
 export function deserializePipelineState(
     data: Record<string, unknown>,
@@ -1367,11 +1204,12 @@ export function deserializePipelineState(
             results: data.results as PipelineState['results'],
             configs: data.configs as PipelineState['configs'],
             selectedStages: data.selectedStages as StageName[],
-            currentStage: null,  // Always reset to null on restore
+            currentStage: null,
             stageStatus: data.stageStatus as Record<StageName, StageStatus>,
             iterationCount: (data.iterationCount as number) || 0,
             iterationHistory: (data.iterationHistory as IterationSnapshot[]) || [],
             isRefining: (data.isRefining as boolean) || false,
+            selectedFields: (data.selectedFields as FieldSelection) || {},
             exportData: data.exportData as string | null,
         };
     } catch (e) {

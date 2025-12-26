@@ -2,15 +2,25 @@
 //
 // Settings modal popup
 
-import { MODULE_NAME, DEFAULT_SYSTEM_PROMPT, DEFAULT_REFINEMENT_PROMPT, VERSION } from '../constants';
+import {
+    MODULE_NAME,
+    BASE_SYSTEM_PROMPT,
+    BASE_REFINEMENT_PROMPT,
+    VERSION,
+} from '../constants';
 import {
     getSettings,
     updateSetting,
     updateGenerationConfig,
-    updateSystemPrompt,
-    resetSystemPrompt,
-    updateRefinementPrompt,
-    resetRefinementPrompt,
+    updateUserSystemPrompt,
+    updateBaseSystemPrompt,
+    updateStageSystemPrompt,
+    updateUserRefinementPrompt,
+    updateBaseRefinementPrompt,
+    resetUserSystemPrompt,
+    resetBaseSystemPrompt,
+    resetUserRefinementPrompt,
+    resetBaseRefinementPrompt,
     setDebugMode,
     getPromptPresets,
     getSchemaPresets,
@@ -135,21 +145,96 @@ function buildSettingsContent(): string {
           <span>System Prompt</span>
         </div>
 
-        <p class="${MODULE_NAME}_settings_hint">Base instructions applied to all stages</p>
+        <p class="${MODULE_NAME}_settings_hint">
+          The system prompt is sent with every generation. Base prompt provides core instructions,
+          your additions are appended after.
+        </p>
 
-        <textarea
-          id="${MODULE_NAME}_system_prompt"
-          class="text_pole ${MODULE_NAME}_system_prompt_textarea"
-          rows="6"
-        >${escapeHtml(settings.systemPrompt)}</textarea>
-
-        <div class="${MODULE_NAME}_settings_row_spread">
-          <span id="${MODULE_NAME}_system_prompt_chars">${settings.systemPrompt.length.toLocaleString()} chars</span>
-          <button id="${MODULE_NAME}_reset_system_prompt" class="menu_button">
-            <i class="fa-solid fa-rotate-left"></i>
-            Reset
-          </button>
+        <!-- User additions (main) -->
+        <div class="${MODULE_NAME}_settings_subsection">
+          <label class="${MODULE_NAME}_settings_label">Your Additions</label>
+          <textarea
+            id="${MODULE_NAME}_user_system_prompt"
+            class="text_pole ${MODULE_NAME}_system_prompt_textarea"
+            rows="4"
+            placeholder="Add your custom instructions here..."
+          >${escapeHtml(settings.userSystemPrompt || '')}</textarea>
+          <div class="${MODULE_NAME}_settings_row_spread">
+            <span id="${MODULE_NAME}_user_system_prompt_chars">${(settings.userSystemPrompt || '').length} chars</span>
+            <button id="${MODULE_NAME}_clear_user_system_prompt" class="menu_button">
+              <i class="fa-solid fa-eraser"></i>
+              Clear
+            </button>
+          </div>
         </div>
+
+        <!-- Base prompt (collapsible advanced) -->
+        <details class="${MODULE_NAME}_settings_advanced">
+          <summary>
+            <i class="fa-solid fa-caret-right"></i>
+            Base Prompt (Advanced)
+          </summary>
+          <div class="${MODULE_NAME}_settings_advanced_content">
+            <p class="${MODULE_NAME}_settings_hint ${MODULE_NAME}_settings_warning">
+              ⚠️ Editing the base prompt may affect all stages. Reset to restore defaults.
+            </p>
+            <textarea
+              id="${MODULE_NAME}_base_system_prompt"
+              class="text_pole ${MODULE_NAME}_system_prompt_textarea"
+              rows="6"
+            >${escapeHtml(settings.baseSystemPrompt || '')}</textarea>
+            <div class="${MODULE_NAME}_settings_row_spread">
+              <span id="${MODULE_NAME}_base_system_prompt_chars">${(settings.baseSystemPrompt || '').length} chars</span>
+              <button id="${MODULE_NAME}_reset_base_system_prompt" class="menu_button">
+                <i class="fa-solid fa-rotate-left"></i>
+                Reset
+              </button>
+            </div>
+          </div>
+        </details>
+
+        <!-- Per-stage additions (collapsible advanced) -->
+        <details class="${MODULE_NAME}_settings_advanced">
+          <summary>
+            <i class="fa-solid fa-caret-right"></i>
+            Per-Stage Additions (Advanced)
+          </summary>
+          <div class="${MODULE_NAME}_settings_advanced_content">
+            <p class="${MODULE_NAME}_settings_hint">
+              Optional additions appended for specific stages only.
+            </p>
+
+            <div class="${MODULE_NAME}_settings_field">
+              <label>Score Stage</label>
+              <textarea
+                id="${MODULE_NAME}_stage_system_prompt_score"
+                class="text_pole"
+                rows="2"
+                placeholder="Additional instructions for scoring..."
+              >${escapeHtml(settings.stageSystemPrompts?.score || '')}</textarea>
+            </div>
+
+            <div class="${MODULE_NAME}_settings_field">
+              <label>Rewrite Stage</label>
+              <textarea
+                id="${MODULE_NAME}_stage_system_prompt_rewrite"
+                class="text_pole"
+                rows="2"
+                placeholder="Additional instructions for rewriting..."
+              >${escapeHtml(settings.stageSystemPrompts?.rewrite || '')}</textarea>
+            </div>
+
+            <div class="${MODULE_NAME}_settings_field">
+              <label>Analyze Stage</label>
+              <textarea
+                id="${MODULE_NAME}_stage_system_prompt_analyze"
+                class="text_pole"
+                rows="2"
+                placeholder="Additional instructions for analysis..."
+              >${escapeHtml(settings.stageSystemPrompts?.analyze || '')}</textarea>
+            </div>
+          </div>
+        </details>
       </div>
 
       <!-- Refinement Prompt -->
@@ -159,21 +244,49 @@ function buildSettingsContent(): string {
           <span>Refinement Prompt</span>
         </div>
 
-        <p class="${MODULE_NAME}_settings_hint">Template for iterative refinement. Placeholders: {{original_character}}, {{current_rewrite}}, {{current_analysis}}, {{score_results}}, {{iteration_number}}</p>
+        <p class="${MODULE_NAME}_settings_hint">
+          Instructions for the refinement loop. Base provides core guidance, your additions are appended.
+        </p>
 
-        <textarea
-          id="${MODULE_NAME}_refinement_prompt"
-          class="text_pole ${MODULE_NAME}_system_prompt_textarea"
-          rows="8"
-        >${escapeHtml(settings.refinementPrompt)}</textarea>
-
-        <div class="${MODULE_NAME}_settings_row_spread">
-          <span id="${MODULE_NAME}_refinement_prompt_chars">${settings.refinementPrompt.length.toLocaleString()} chars</span>
-          <button id="${MODULE_NAME}_reset_refinement_prompt" class="menu_button">
-            <i class="fa-solid fa-rotate-left"></i>
-            Reset
-          </button>
+        <!-- User additions -->
+        <div class="${MODULE_NAME}_settings_subsection">
+          <label class="${MODULE_NAME}_settings_label">Your Additions</label>
+          <textarea
+            id="${MODULE_NAME}_user_refinement_prompt"
+            class="text_pole ${MODULE_NAME}_system_prompt_textarea"
+            rows="4"
+            placeholder="Add your refinement instructions here..."
+          >${escapeHtml(settings.userRefinementPrompt || '')}</textarea>
+          <div class="${MODULE_NAME}_settings_row_spread">
+            <span id="${MODULE_NAME}_user_refinement_prompt_chars">${(settings.userRefinementPrompt || '').length} chars</span>
+            <button id="${MODULE_NAME}_clear_user_refinement_prompt" class="menu_button">
+              <i class="fa-solid fa-eraser"></i>
+              Clear
+            </button>
+          </div>
         </div>
+
+        <!-- Base prompt (collapsible) -->
+        <details class="${MODULE_NAME}_settings_advanced">
+          <summary>
+            <i class="fa-solid fa-caret-right"></i>
+            Base Prompt (Advanced)
+          </summary>
+          <div class="${MODULE_NAME}_settings_advanced_content">
+            <textarea
+              id="${MODULE_NAME}_base_refinement_prompt"
+              class="text_pole ${MODULE_NAME}_system_prompt_textarea"
+              rows="6"
+            >${escapeHtml(settings.baseRefinementPrompt || '')}</textarea>
+            <div class="${MODULE_NAME}_settings_row_spread">
+              <span id="${MODULE_NAME}_base_refinement_prompt_chars">${(settings.baseRefinementPrompt || '').length} chars</span>
+              <button id="${MODULE_NAME}_reset_base_refinement_prompt" class="menu_button">
+                <i class="fa-solid fa-rotate-left"></i>
+                Reset
+              </button>
+            </div>
+          </div>
+        </details>
       </div>
 
       <!-- Preset Management -->
@@ -306,6 +419,8 @@ function initSettingsListeners(): void {
     const modal = document.getElementById(`${MODULE_NAME}_settings_modal`);
     if (!modal) return;
 
+    // ========== GENERATION CONFIG ==========
+
     // Use current settings toggle
     const useCurrentCheckbox = modal.querySelector(`#${MODULE_NAME}_use_current_settings`) as HTMLInputElement;
     const customConfig = modal.querySelector(`#${MODULE_NAME}_custom_gen_config`);
@@ -348,53 +463,97 @@ function initSettingsListeners(): void {
     handleNumberInput(genPres, 'presencePenalty');
     handleNumberInput(genTopP, 'topP');
 
-    // System prompt
-    const systemPromptTextarea = modal.querySelector(`#${MODULE_NAME}_system_prompt`) as HTMLTextAreaElement;
-    const systemPromptChars = modal.querySelector(`#${MODULE_NAME}_system_prompt_chars`);
-    const resetSystemPromptBtn = modal.querySelector(`#${MODULE_NAME}_reset_system_prompt`);
+    // ========== USER SYSTEM PROMPT ==========
 
-    systemPromptTextarea?.addEventListener('input', () => {
-        updateSystemPrompt(systemPromptTextarea.value);
-        if (systemPromptChars) {
-            systemPromptChars.textContent = `${systemPromptTextarea.value.length.toLocaleString()} chars`;
+    const userSystemPromptTextarea = modal.querySelector(`#${MODULE_NAME}_user_system_prompt`) as HTMLTextAreaElement;
+    const userSystemPromptChars = modal.querySelector(`#${MODULE_NAME}_user_system_prompt_chars`);
+    const clearUserSystemPromptBtn = modal.querySelector(`#${MODULE_NAME}_clear_user_system_prompt`);
+
+    userSystemPromptTextarea?.addEventListener('input', () => {
+        updateUserSystemPrompt(userSystemPromptTextarea.value);
+        if (userSystemPromptChars) {
+            userSystemPromptChars.textContent = `${userSystemPromptTextarea.value.length} chars`;
         }
     });
 
-    resetSystemPromptBtn?.addEventListener('click', () => {
-        resetSystemPrompt();
-        if (systemPromptTextarea) {
-            systemPromptTextarea.value = DEFAULT_SYSTEM_PROMPT;
-        }
-        if (systemPromptChars) {
-            systemPromptChars.textContent = `${DEFAULT_SYSTEM_PROMPT.length.toLocaleString()} chars`;
-        }
-        toastr.info('System prompt reset to default');
+    clearUserSystemPromptBtn?.addEventListener('click', () => {
+        resetUserSystemPrompt();
+        if (userSystemPromptTextarea) userSystemPromptTextarea.value = '';
+        if (userSystemPromptChars) userSystemPromptChars.textContent = '0 chars';
+        toastr.info('User system prompt cleared');
     });
 
-    // Refinement prompt
-    const refinementPromptTextarea = modal.querySelector(`#${MODULE_NAME}_refinement_prompt`) as HTMLTextAreaElement;
-    const refinementPromptChars = modal.querySelector(`#${MODULE_NAME}_refinement_prompt_chars`);
-    const resetRefinementPromptBtn = modal.querySelector(`#${MODULE_NAME}_reset_refinement_prompt`);
+    // ========== BASE SYSTEM PROMPT ==========
 
-    refinementPromptTextarea?.addEventListener('input', () => {
-        updateRefinementPrompt(refinementPromptTextarea.value);
-        if (refinementPromptChars) {
-            refinementPromptChars.textContent = `${refinementPromptTextarea.value.length.toLocaleString()} chars`;
+    const baseSystemPromptTextarea = modal.querySelector(`#${MODULE_NAME}_base_system_prompt`) as HTMLTextAreaElement;
+    const baseSystemPromptChars = modal.querySelector(`#${MODULE_NAME}_base_system_prompt_chars`);
+    const resetBaseSystemPromptBtn = modal.querySelector(`#${MODULE_NAME}_reset_base_system_prompt`);
+
+    baseSystemPromptTextarea?.addEventListener('input', () => {
+        updateBaseSystemPrompt(baseSystemPromptTextarea.value);
+        if (baseSystemPromptChars) {
+            baseSystemPromptChars.textContent = `${baseSystemPromptTextarea.value.length} chars`;
         }
     });
 
-    resetRefinementPromptBtn?.addEventListener('click', () => {
-        resetRefinementPrompt();
-        if (refinementPromptTextarea) {
-            refinementPromptTextarea.value = DEFAULT_REFINEMENT_PROMPT;
-        }
-        if (refinementPromptChars) {
-            refinementPromptChars.textContent = `${DEFAULT_REFINEMENT_PROMPT.length.toLocaleString()} chars`;
-        }
-        toastr.info('Refinement prompt reset to default');
+    resetBaseSystemPromptBtn?.addEventListener('click', () => {
+        resetBaseSystemPrompt();
+        if (baseSystemPromptTextarea) baseSystemPromptTextarea.value = BASE_SYSTEM_PROMPT;
+        if (baseSystemPromptChars) baseSystemPromptChars.textContent = `${BASE_SYSTEM_PROMPT.length} chars`;
+        toastr.info('Base system prompt reset to default');
     });
 
-    // Preset management
+    // ========== STAGE SYSTEM PROMPTS ==========
+
+    for (const stage of ['score', 'rewrite', 'analyze'] as const) {
+        const textarea = modal.querySelector(`#${MODULE_NAME}_stage_system_prompt_${stage}`) as HTMLTextAreaElement;
+        textarea?.addEventListener('input', () => {
+            updateStageSystemPrompt(stage, textarea.value);
+        });
+    }
+
+    // ========== USER REFINEMENT PROMPT ==========
+
+    const userRefinementPromptTextarea = modal.querySelector(`#${MODULE_NAME}_user_refinement_prompt`) as HTMLTextAreaElement;
+    const userRefinementPromptChars = modal.querySelector(`#${MODULE_NAME}_user_refinement_prompt_chars`);
+    const clearUserRefinementPromptBtn = modal.querySelector(`#${MODULE_NAME}_clear_user_refinement_prompt`);
+
+    userRefinementPromptTextarea?.addEventListener('input', () => {
+        updateUserRefinementPrompt(userRefinementPromptTextarea.value);
+        if (userRefinementPromptChars) {
+            userRefinementPromptChars.textContent = `${userRefinementPromptTextarea.value.length} chars`;
+        }
+    });
+
+    clearUserRefinementPromptBtn?.addEventListener('click', () => {
+        resetUserRefinementPrompt();
+        if (userRefinementPromptTextarea) userRefinementPromptTextarea.value = '';
+        if (userRefinementPromptChars) userRefinementPromptChars.textContent = '0 chars';
+        toastr.info('User refinement prompt cleared');
+    });
+
+    // ========== BASE REFINEMENT PROMPT ==========
+
+    const baseRefinementPromptTextarea = modal.querySelector(`#${MODULE_NAME}_base_refinement_prompt`) as HTMLTextAreaElement;
+    const baseRefinementPromptChars = modal.querySelector(`#${MODULE_NAME}_base_refinement_prompt_chars`);
+    const resetBaseRefinementPromptBtn = modal.querySelector(`#${MODULE_NAME}_reset_base_refinement_prompt`);
+
+    baseRefinementPromptTextarea?.addEventListener('input', () => {
+        updateBaseRefinementPrompt(baseRefinementPromptTextarea.value);
+        if (baseRefinementPromptChars) {
+            baseRefinementPromptChars.textContent = `${baseRefinementPromptTextarea.value.length} chars`;
+        }
+    });
+
+    resetBaseRefinementPromptBtn?.addEventListener('click', () => {
+        resetBaseRefinementPrompt();
+        if (baseRefinementPromptTextarea) baseRefinementPromptTextarea.value = BASE_REFINEMENT_PROMPT;
+        if (baseRefinementPromptChars) baseRefinementPromptChars.textContent = `${BASE_REFINEMENT_PROMPT.length} chars`;
+        toastr.info('Base refinement prompt reset to default');
+    });
+
+    // ========== PRESET MANAGEMENT ==========
+
     modal.addEventListener('click', (e) => {
         const deleteBtn = (e.target as HTMLElement).closest(`.${MODULE_NAME}_preset_delete`);
         if (deleteBtn) {
@@ -431,7 +590,8 @@ function initSettingsListeners(): void {
         }
     });
 
-    // Debug
+    // ========== DEBUG ==========
+
     const debugModeCheckbox = modal.querySelector(`#${MODULE_NAME}_debug_mode`) as HTMLInputElement;
     const viewLogsBtn = modal.querySelector(`#${MODULE_NAME}_view_logs`);
     const clearLogsBtn = modal.querySelector(`#${MODULE_NAME}_clear_logs`);

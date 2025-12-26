@@ -5,10 +5,11 @@
 import { getSettings } from './settings';
 import { initPanel } from './ui/panel';
 import { debugLog, logError } from './debug';
+import { VERSION } from './constants';
 
 function init(): void {
     try {
-        debugLog('info', 'Extension initializing', { version: '1.0.0' });
+        debugLog('info', 'Extension initializing', { version: VERSION });
 
         initPanel();
         registerEventListeners();

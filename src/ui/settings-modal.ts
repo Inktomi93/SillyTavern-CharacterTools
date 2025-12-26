@@ -2,7 +2,7 @@
 //
 // Settings modal popup
 
-import { MODULE_NAME, DEFAULT_SYSTEM_PROMPT, DEFAULT_REFINEMENT_PROMPT } from '../constants';
+import { MODULE_NAME, DEFAULT_SYSTEM_PROMPT, DEFAULT_REFINEMENT_PROMPT, VERSION } from '../constants';
 import {
     getSettings,
     updateSetting,
@@ -270,7 +270,7 @@ function buildSettingsContent(): string {
 
       <!-- Footer -->
       <div class="${MODULE_NAME}_settings_footer">
-        <span class="${MODULE_NAME}_settings_version">v1.0.0 • Last updated: ${moment().format('YYYY-MM-DD HH:mm:ss')}</span>
+        <span class="${MODULE_NAME}_settings_version">v${VERSION} • Last updated: ${moment().format('YYYY-MM-DD HH:mm:ss')}</span>
       </div>
     </div>
   `;

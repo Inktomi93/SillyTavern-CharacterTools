@@ -1,10 +1,12 @@
 {
-  "name": "extension-webpack-template",
+  "name": "sillytavern-character-tools",
   "type": "module",
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "webpack --mode production",
+    "sync-version": "node scripts/sync-version.js",
+    "build": "npm run sync-version && webpack --mode production",
+    "release": "node scripts/release.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },

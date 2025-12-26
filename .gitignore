@@ -31,15 +31,6 @@ yarn-error.log*
 Thumbs.db
 Desktop.ini
 
-# Package manager locks (optional - some prefer to commit these)
-# Uncomment if you don't want to track lock files
-# package-lock.json
-# yarn.lock
-
-# Snapshots / Debug
-project_snapshot.txt
-snapshot.sh
-
 # Test coverage
 coverage/
 
@@ -47,3 +38,7 @@ coverage/
 *.tmp
 *.temp
 .cache/
+
+# Local dev tools - don't leak personal workflow
+project_snapshot.txt
+snapshot.sh

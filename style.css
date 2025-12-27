@@ -2213,3 +2213,44 @@
     outline-offset: 2px;
   }
 }
+
+/* ============================================================================
+   POPUP WIDTH OVERRIDE
+   Force wider popup when Character Tools is open
+   ============================================================================ */
+
+/* Target the popup dialog that contains our extension */
+.popup:has(.character_tools_popup) {
+  max-width: 95vw !important;
+  width: 95vw !important;
+}
+
+/* For the popup content area */
+.popup:has(.character_tools_popup) .popup-content {
+  max-width: none !important;
+  width: 100% !important;
+}
+
+/* Ensure our popup fills the available space */
+.character_tools_popup {
+  width: 100%;
+  max-width: 1200px; /* Cap at reasonable desktop width */
+  margin: 0 auto;
+}
+
+/* Settings modal - also wider */
+.popup:has(.character_tools_settings_modal) {
+  max-width: 90vw !important;
+  width: 90vw !important;
+}
+
+.popup:has(.character_tools_settings_modal) .popup-content {
+  max-width: none !important;
+  width: 100% !important;
+}
+
+.character_tools_settings_modal {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+}

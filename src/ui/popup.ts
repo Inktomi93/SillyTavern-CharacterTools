@@ -20,7 +20,6 @@ import {
     getNextStage,
     canRunStage,
     canRefine,
-    validatePipeline,
     validateRefinement,
     buildStagePrompt,
     getStageSchema,
@@ -1346,6 +1345,7 @@ async function runSingleStage(stage: StageName): Promise<void> {
     }
 }
 
+// CHANGED: runSelectedStages - run sequentially without pre-checking dependencies
 async function runSelectedStages(): Promise<void> {
     if (!popupState || popupState.isGenerating || popupState.isRefining) return;
 
@@ -1354,27 +1354,44 @@ async function runSelectedStages(): Promise<void> {
         return;
     }
 
-    const validation = validatePipeline(popupState.pipeline);
-    if (!validation.valid) {
-        toastr.error(validation.errors.join('\n'));
+    // Only validate character and field selection, not stage dependencies
+    if (!popupState.pipeline.character) {
+        toastr.error('No character selected');
         return;
     }
 
-    if (validation.warnings.length > 0) {
-        toastr.warning(validation.warnings.join('\n'));
+    const hasSelectedFields = Object.values(popupState.pipeline.selectedFields).some(v =>
+        v === true || (Array.isArray(v) && v.length > 0),
+    );
+
+    if (!hasSelectedFields) {
+        toastr.error('No fields selected');
+        return;
     }
 
+    if (popupState.pipeline.selectedStages.length === 0) {
+        toastr.error('No stages selected');
+        return;
+    }
+
+    // Run each selected stage in order
     for (const stage of popupState.pipeline.selectedStages) {
+        // Skip if already complete
         const status = popupState.pipeline.stageStatus[stage];
         if (status === 'complete' || status === 'skipped') {
             continue;
         }
 
+        // Switch view to current stage
         popupState.activeStageView = stage;
         updateStageSection();
+        updatePipelineNav();  // <-- ADD THIS
+        updateResultsPanel(); // <-- AND THIS so you see the loading state
 
+        // Run the stage (runSingleStage handles its own validation)
         await runSingleStage(stage);
 
+        // Bail if popup closed or stage failed
         if (!popupState) break;
 
         const newStatus = popupState.pipeline.stageStatus[stage];
@@ -1383,6 +1400,7 @@ async function runSelectedStages(): Promise<void> {
         }
     }
 }
+
 
 async function runAllStages(): Promise<void> {
     if (!popupState) return;

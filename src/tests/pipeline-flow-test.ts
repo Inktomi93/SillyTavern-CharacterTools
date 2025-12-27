@@ -9,12 +9,13 @@ import {
     initializeFieldSelection,
     startRefinement,
     completeRefinement,
+    generateExportData,
 } from '../pipeline';
 import type { Character } from '../types';
 
 /**
  * Test that pipeline stages receive correct data from previous stages,
- * INCLUDING iteration/refinement cycles.
+ * INCLUDING iteration/refinement cycles and export functionality.
  *
  * Run this from browser console: window.testPipelineFlow()
  */
@@ -49,9 +50,10 @@ export function testPipelineFlow(): { passed: boolean; errors: string[]; warning
     assertContains(scorePrompt, 'ORIGINAL_CHAR_MARKER_A1B2C3',
         '1.1 Score prompt includes original character', errors);
 
-    // Complete score
+    // Complete score with a LONG response to test truncation
+    const scoreResponse = 'SCORE_V1_MARKER_X9Y8Z7 - Initial score feedback. '.repeat(50) + 'SCORE_V1_END_MARKER';
     state = completeStage(state, 'score', {
-        response: 'SCORE_V1_MARKER_X9Y8Z7 - Initial score feedback',
+        response: scoreResponse,
         isStructured: false,
         promptUsed: scorePrompt || '',
         schemaUsed: null,
@@ -64,9 +66,10 @@ export function testPipelineFlow(): { passed: boolean; errors: string[]; warning
     assertContains(rewritePrompt, 'SCORE_V1_MARKER_X9Y8Z7',
         '1.3 Rewrite prompt includes score results', errors);
 
-    // Complete rewrite with V1 marker
+    // Complete rewrite with V1 marker and LONG response
+    const rewriteV1Response = 'REWRITE_V1_MARKER_P4Q5R6 - First rewrite attempt. '.repeat(50) + 'REWRITE_V1_END_MARKER';
     state = completeStage(state, 'rewrite', {
-        response: 'REWRITE_V1_MARKER_P4Q5R6 - First rewrite attempt',
+        response: rewriteV1Response,
         isStructured: false,
         promptUsed: rewritePrompt || '',
         schemaUsed: null,
@@ -81,9 +84,10 @@ export function testPipelineFlow(): { passed: boolean; errors: string[]; warning
     assertNotContains(analyzePrompt1, 'REWRITE_V2',
         '1.6 Analyze prompt does NOT contain V2 (doesn\'t exist yet)', errors);
 
-    // Complete analyze
+    // Complete analyze with LONG response
+    const analyzeV1Response = 'ANALYSIS_V1_MARKER_M1N2O3 - First analysis, needs refinement. '.repeat(50) + 'ANALYSIS_V1_END_MARKER';
     state = completeStage(state, 'analyze', {
-        response: 'ANALYSIS_V1_MARKER_M1N2O3 - First analysis, needs refinement',
+        response: analyzeV1Response,
         isStructured: false,
         promptUsed: analyzePrompt1 || '',
         schemaUsed: null,
@@ -105,7 +109,7 @@ export function testPipelineFlow(): { passed: boolean; errors: string[]; warning
     assertContains(refinementPrompt1, 'ANALYSIS_V1_MARKER_M1N2O3',
         '2.3 Refinement prompt includes analysis V1', errors);
 
-    // Start refinement (this should snapshot current state and clear analyze)
+    // Start refinement
     state = startRefinement(state);
 
     // TEST 2.2: After startRefinement, analyze should be cleared
@@ -135,9 +139,10 @@ export function testPipelineFlow(): { passed: boolean; errors: string[]; warning
             '2.8 History entry contains analysis V1', errors);
     }
 
-    // Complete refinement with V2 rewrite
+    // Complete refinement with V2 rewrite (LONG)
+    const rewriteV2Response = 'REWRITE_V2_MARKER_J7K8L9 - Second rewrite after refinement. '.repeat(50) + 'REWRITE_V2_END_MARKER';
     state = completeRefinement(state, {
-        response: 'REWRITE_V2_MARKER_J7K8L9 - Second rewrite after refinement',
+        response: rewriteV2Response,
         isStructured: false,
         promptUsed: refinementPrompt1 || '',
         schemaUsed: null,
@@ -165,9 +170,10 @@ export function testPipelineFlow(): { passed: boolean; errors: string[]; warning
     assertNotContains(analyzePrompt2, 'REWRITE_V1_MARKER_P4Q5R6',
         '3.3 Analyze V2 prompt does NOT contain rewrite V1 (CRITICAL)', errors);
 
-    // Complete analyze V2
+    // Complete analyze V2 (LONG)
+    const analyzeV2Response = 'ANALYSIS_V2_MARKER_T4U5V6 - Second analysis of refined rewrite. '.repeat(50) + 'ANALYSIS_V2_END_MARKER';
     state = completeStage(state, 'analyze', {
-        response: 'ANALYSIS_V2_MARKER_T4U5V6 - Second analysis of refined rewrite',
+        response: analyzeV2Response,
         isStructured: false,
         promptUsed: analyzePrompt2 || '',
         schemaUsed: null,
@@ -204,7 +210,6 @@ export function testPipelineFlow(): { passed: boolean; errors: string[]; warning
     } else {
         console.log('✓ 4.6 History has 2 entries');
 
-        // Verify history entries are in correct order with correct markers
         const entry1 = state.iterationHistory[0];
         const entry2 = state.iterationHistory[1];
 
@@ -221,9 +226,10 @@ export function testPipelineFlow(): { passed: boolean; errors: string[]; warning
         console.log('✓ 4.9 Iteration count is 2');
     }
 
-    // Complete with V3 rewrite
+    // Complete with V3 rewrite (LONG)
+    const rewriteV3Response = 'REWRITE_V3_MARKER_W1X2Y3 - Third rewrite. '.repeat(50) + 'REWRITE_V3_END_MARKER';
     state = completeRefinement(state, {
-        response: 'REWRITE_V3_MARKER_W1X2Y3 - Third rewrite',
+        response: rewriteV3Response,
         isStructured: false,
         promptUsed: refinementPrompt2 || '',
         schemaUsed: null,
@@ -251,14 +257,22 @@ export function testPipelineFlow(): { passed: boolean; errors: string[]; warning
     assertNotContains(analyzePrompt3, 'REWRITE_V2',
         '5.5 Analyze V3 does NOT contain V2', errors);
 
+    // Complete analyze V3 for export testing
+    const analyzeV3Response = 'ANALYSIS_V3_MARKER_Z9A8B7 - Third analysis. '.repeat(50) + 'ANALYSIS_V3_END_MARKER';
+    state = completeStage(state, 'analyze', {
+        response: analyzeV3Response,
+        isStructured: false,
+        promptUsed: analyzePrompt3 || '',
+        schemaUsed: null,
+    });
+
     console.log('');
 
     // ========================================================================
-    // PHASE 6: Score should ALWAYS use original, never rewrites
+    // PHASE 6: Score Isolation Check
     // ========================================================================
     console.log('--- PHASE 6: Score Isolation Check ---\n');
 
-    // Even after all these iterations, score should only see original
     const scorePromptAfterIterations = buildStagePrompt(state, 'score');
     assertContains(scorePromptAfterIterations, 'ORIGINAL_CHAR_MARKER_A1B2C3',
         '6.1 Score (after iterations) includes original', errors);
@@ -272,13 +286,149 @@ export function testPipelineFlow(): { passed: boolean; errors: string[]; warning
     console.log('');
 
     // ========================================================================
+    // PHASE 7: Export Data Integrity
+    // ========================================================================
+    console.log('--- PHASE 7: Export Data Integrity ---\n');
+
+    const exportData = generateExportData(state);
+
+    if (!exportData) {
+        errors.push('FAIL: 7.0 Export data is null');
+    } else {
+        // TEST 7.1: Export contains character name
+        assertContains(exportData, 'TestChar',
+            '7.1 Export contains character name', errors);
+
+        // TEST 7.2: Export contains CURRENT score (V1 - score doesn't iterate)
+        assertContains(exportData, 'SCORE_V1_MARKER_X9Y8Z7',
+            '7.2 Export contains score results', errors);
+        assertContains(exportData, 'SCORE_V1_END_MARKER',
+            '7.3 Export contains COMPLETE score (end marker present)', errors);
+
+        // TEST 7.3: Export contains CURRENT rewrite (V3, not V1 or V2)
+        assertContains(exportData, 'REWRITE_V3_MARKER_W1X2Y3',
+            '7.4 Export contains current rewrite V3', errors);
+        assertContains(exportData, 'REWRITE_V3_END_MARKER',
+            '7.5 Export contains COMPLETE rewrite V3 (end marker present)', errors);
+
+        // TEST 7.4: Export contains CURRENT analysis (V3)
+        assertContains(exportData, 'ANALYSIS_V3_MARKER_Z9A8B7',
+            '7.6 Export contains current analysis V3', errors);
+        assertContains(exportData, 'ANALYSIS_V3_END_MARKER',
+            '7.7 Export contains COMPLETE analysis V3 (end marker present)', errors);
+
+        // TEST 7.5: Export iteration history contains V1 and V2 (historical)
+        assertContains(exportData, 'REWRITE_V1_MARKER_P4Q5R6',
+            '7.8 Export history contains rewrite V1', errors);
+        assertContains(exportData, 'REWRITE_V1_END_MARKER',
+            '7.9 Export history contains COMPLETE rewrite V1 (end marker)', errors);
+        assertContains(exportData, 'REWRITE_V2_MARKER_J7K8L9',
+            '7.10 Export history contains rewrite V2', errors);
+        assertContains(exportData, 'REWRITE_V2_END_MARKER',
+            '7.11 Export history contains COMPLETE rewrite V2 (end marker)', errors);
+
+        // TEST 7.6: Export history contains V1 and V2 analyses
+        assertContains(exportData, 'ANALYSIS_V1_MARKER_M1N2O3',
+            '7.12 Export history contains analysis V1', errors);
+        assertContains(exportData, 'ANALYSIS_V1_END_MARKER',
+            '7.13 Export history contains COMPLETE analysis V1 (end marker)', errors);
+        assertContains(exportData, 'ANALYSIS_V2_MARKER_T4U5V6',
+            '7.14 Export history contains analysis V2', errors);
+        assertContains(exportData, 'ANALYSIS_V2_END_MARKER',
+            '7.15 Export history contains COMPLETE analysis V2 (end marker)', errors);
+
+        // TEST 7.7: Verify export length is reasonable (not truncated)
+        const expectedMinLength = scoreResponse.length + rewriteV3Response.length + analyzeV3Response.length +
+            rewriteV1Response.length + analyzeV1Response.length +
+            rewriteV2Response.length + analyzeV2Response.length;
+
+        if (exportData.length < expectedMinLength * 0.9) {
+            errors.push(`FAIL: 7.16 Export appears truncated. Expected ~${expectedMinLength} chars, got ${exportData.length}`);
+        } else {
+            console.log(`✓ 7.16 Export length OK (${exportData.length} chars, expected ~${expectedMinLength})`);
+        }
+
+        // TEST 7.8: Export has correct iteration count
+        assertContains(exportData, 'Iterations:** 2',
+            '7.17 Export shows correct iteration count', errors);
+
+        // TEST 7.9: Export has section headers
+        assertContains(exportData, '## Score Results',
+            '7.18 Export has Score Results section', errors);
+        assertContains(exportData, '## Rewrite Results',
+            '7.19 Export has Rewrite Results section', errors);
+        assertContains(exportData, '## Analysis Results',
+            '7.20 Export has Analysis Results section', errors);
+        assertContains(exportData, '## Iteration History',
+            '7.21 Export has Iteration History section', errors);
+    }
+
+    console.log('');
+
+    // ========================================================================
+    // PHASE 8: Data Integrity - Full Response Storage
+    // ========================================================================
+    console.log('--- PHASE 8: Data Integrity - Full Response Storage ---\n');
+
+    // Verify the actual state objects have complete data
+    const storedScore = state.results.score?.response || '';
+    const storedRewrite = state.results.rewrite?.response || '';
+    const storedAnalyze = state.results.analyze?.response || '';
+
+    // Check score is complete
+    assertContains(storedScore, 'SCORE_V1_MARKER_X9Y8Z7',
+        '8.1 Stored score has start marker', errors);
+    assertContains(storedScore, 'SCORE_V1_END_MARKER',
+        '8.2 Stored score has end marker (not truncated)', errors);
+    if (storedScore.length !== scoreResponse.length) {
+        errors.push(`FAIL: 8.3 Stored score length mismatch. Expected ${scoreResponse.length}, got ${storedScore.length}`);
+    } else {
+        console.log(`✓ 8.3 Stored score length matches (${storedScore.length} chars)`);
+    }
+
+    // Check rewrite is complete (should be V3)
+    assertContains(storedRewrite, 'REWRITE_V3_MARKER_W1X2Y3',
+        '8.4 Stored rewrite has V3 start marker', errors);
+    assertContains(storedRewrite, 'REWRITE_V3_END_MARKER',
+        '8.5 Stored rewrite has V3 end marker (not truncated)', errors);
+    if (storedRewrite.length !== rewriteV3Response.length) {
+        errors.push(`FAIL: 8.6 Stored rewrite length mismatch. Expected ${rewriteV3Response.length}, got ${storedRewrite.length}`);
+    } else {
+        console.log(`✓ 8.6 Stored rewrite length matches (${storedRewrite.length} chars)`);
+    }
+
+    // Check analyze is complete (should be V3)
+    assertContains(storedAnalyze, 'ANALYSIS_V3_MARKER_Z9A8B7',
+        '8.7 Stored analyze has V3 start marker', errors);
+    assertContains(storedAnalyze, 'ANALYSIS_V3_END_MARKER',
+        '8.8 Stored analyze has V3 end marker (not truncated)', errors);
+    if (storedAnalyze.length !== analyzeV3Response.length) {
+        errors.push(`FAIL: 8.9 Stored analyze length mismatch. Expected ${analyzeV3Response.length}, got ${storedAnalyze.length}`);
+    } else {
+        console.log(`✓ 8.9 Stored analyze length matches (${storedAnalyze.length} chars)`);
+    }
+
+    // Check history entries are complete
+    for (let i = 0; i < state.iterationHistory.length; i++) {
+        const entry = state.iterationHistory[i];
+        const vNum = i + 1;
+
+        assertContains(entry.rewriteResponse, `REWRITE_V${vNum}_END_MARKER`,
+            `8.${10 + i * 2} History[${i}] rewrite is complete (has end marker)`, errors);
+        assertContains(entry.analysisResponse, `ANALYSIS_V${vNum}_END_MARKER`,
+            `8.${11 + i * 2} History[${i}] analysis is complete (has end marker)`, errors);
+    }
+
+    console.log('');
+
+    // ========================================================================
     // SUMMARY
     // ========================================================================
     console.log('=== PIPELINE FLOW TEST RESULTS ===\n');
 
     if (errors.length === 0) {
         console.log('✅ ALL TESTS PASSED');
-        console.log(`   ${6} phases, ${25}+ assertions`);
+        console.log('   8 phases, 40+ assertions');
         return { passed: true, errors: [], warnings };
     } else {
         console.error(`❌ ${errors.length} FAILURE(S):`);
@@ -299,6 +449,7 @@ function assertContains(
 ): void {
     if (!haystack) {
         errors.push(`FAIL: ${testName} - haystack is null/undefined`);
+        console.error(`✗ ${testName} - haystack is null/undefined`);
         return;
     }
     if (haystack.includes(needle)) {
@@ -306,7 +457,6 @@ function assertContains(
     } else {
         errors.push(`FAIL: ${testName}`);
         console.error(`✗ ${testName}`);
-        // Debug: show what we got
         console.debug(`  Expected to find: "${needle}"`);
         console.debug(`  In (first 200 chars): "${haystack.substring(0, 200)}..."`);
     }
@@ -319,7 +469,6 @@ function assertNotContains(
     errors: string[],
 ): void {
     if (!haystack) {
-        // If null/undefined, it definitely doesn't contain the needle
         console.log(`✓ ${testName}`);
         return;
     }

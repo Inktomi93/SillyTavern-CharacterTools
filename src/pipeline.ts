@@ -288,6 +288,10 @@ export function canRefine(state: PipelineState): { canRun: boolean; reason?: str
         return { canRun: false, reason: 'No rewrite to refine' };
     }
 
+    if (state.results.rewrite.locked) {
+        return { canRun: false, reason: 'Rewrite is accepted as final' };
+    }
+
     if (!state.results.analyze) {
         return { canRun: false, reason: 'Run analyze first to identify issues' };
     }

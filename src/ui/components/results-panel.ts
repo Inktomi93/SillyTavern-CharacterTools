@@ -226,7 +226,15 @@ function renderFooterActions(
     }
 
     // Stage-specific actions
-    // REMOVED: Apply to Character button for rewrite stage
+    if (stage === 'rewrite' && pipeline.isRefining && !pipeline.results.analyze) {
+        // After refinement completes, prompt user to analyze the new rewrite
+        actions.push(`
+      <button id="${MODULE_NAME}_run_analyze_btn" class="menu_button ${MODULE_NAME}_continue_btn">
+        <i class="fa-solid fa-magnifying-glass-chart"></i>
+        <span>Analyze This Rewrite</span>
+      </button>
+    `);
+    }
 
     if (stage === 'analyze') {
         const verdict = extractVerdict(result.response);
@@ -244,7 +252,7 @@ function renderFooterActions(
       `);
         }
 
-        // Accept button (if we have a rewrite)
+        // Accept button (if we have an unlocked rewrite)
         if (pipeline.results.rewrite && !pipeline.results.rewrite.locked) {
             const isRecommended = verdict === 'accept';
             actions.push(`
@@ -256,8 +264,8 @@ function renderFooterActions(
         }
     }
 
-    // Continue to next stage (not on analyze - use refine/accept instead)
-    if (nextStage && stage !== 'analyze') {
+    // Continue to next stage (not on analyze, not when in refinement mode on rewrite)
+    if (nextStage && stage !== 'analyze' && !(stage === 'rewrite' && pipeline.isRefining)) {
         actions.push(`
       <button id="${MODULE_NAME}_continue_btn" class="menu_button ${MODULE_NAME}_continue_btn">
         <i class="fa-solid fa-arrow-right"></i>

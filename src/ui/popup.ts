@@ -234,9 +234,17 @@ function handleCharacterDeleted(deletedId: number): void {
 function handleCharacterInvalidated(): void {
     if (!popupState) return;
 
+    // Abort any running generation
+    if (popupState.abortController) {
+        popupState.abortController.abort();
+    }
+
     debugLog('info', 'Character invalidated, clearing selection', null);
 
     popupState.pipeline = setCharacter(popupState.pipeline, null, null);
+    popupState.isGenerating = false;
+    popupState.isRefining = false;
+    popupState.abortController = null;
     popupState.historyLoaded = false;
     updateAllComponents();
     toastr.info('Character selection cleared');
@@ -1063,8 +1071,17 @@ function initResultsPanelListeners(): void {
                 updateStageSection();
                 updateResultsPanel();
                 updateTokenEstimate();
-                updatePipelineNav();  // ADDED: Update nav to show new active stage
+                updatePipelineNav();
             }
+        }
+
+        // Run analyze after refinement
+        if (target.closest(`#${MODULE_NAME}_run_analyze_btn`) && popupState) {
+            popupState.activeStageView = 'analyze';
+            updateStageSection();
+            updateResultsPanel();
+            updatePipelineNav();
+            runSingleStage('analyze');
         }
 
         // Refine
@@ -1238,6 +1255,10 @@ async function handleRevertToIteration(index: number): Promise<void> {
     if (confirmed !== POPUP_RESULT.AFFIRMATIVE) return;
 
     popupState.pipeline = revertToIteration(popupState.pipeline, index);
+
+    // Switch to rewrite view since analyze is cleared
+    popupState.activeStageView = 'rewrite';
+
     toastr.info(`Reverted to iteration #${index + 1}`);
 
     if (popupState.pipeline.character) {
@@ -1397,15 +1418,18 @@ async function runRefinement(): Promise<void> {
         toastr.warning(validation.warnings.join('\n'));
     }
 
-    // IMPORTANT: Capture state for generation BEFORE startRefinement clears analyze
-    const stateForGeneration = popupState.pipeline;
+    // CRITICAL: Capture state BEFORE startRefinement clears analyze
+    const stateForGeneration = {
+        ...popupState.pipeline,
+        results: { ...popupState.pipeline.results },
+    };
 
     const preRefinementState = {
         iterationCount: popupState.pipeline.iterationCount,
         iterationHistory: [...popupState.pipeline.iterationHistory],
+        analyzeResult: popupState.pipeline.results.analyze,
     };
 
-    // Now update UI state (this clears analyze)
     popupState.pipeline = startRefinement(popupState.pipeline);
     popupState.isRefining = true;
     popupState.abortController = new AbortController();
@@ -1419,7 +1443,7 @@ async function runRefinement(): Promise<void> {
     updateIterationHistory();
 
     try {
-        // Use the captured state that still has analyze
+        // Use captured state that still has analyze result
         const result = await runRefinementGeneration(
             stateForGeneration,
             popupState.abortController.signal,
@@ -1439,7 +1463,8 @@ async function runRefinement(): Promise<void> {
                 await saveIterationHistory(popupState.pipeline.character, popupState.pipeline.iterationHistory);
             }
 
-            popupState.activeStageView = 'analyze';
+            // Switch to rewrite view to show the new result
+            popupState.activeStageView = 'rewrite';
         } else {
             // Restore previous state on failure
             popupState.pipeline = {
@@ -1448,12 +1473,13 @@ async function runRefinement(): Promise<void> {
                 iterationHistory: preRefinementState.iterationHistory,
                 results: {
                     ...popupState.pipeline.results,
-                    analyze: stateForGeneration.results.analyze, // Restore analyze too
+                    analyze: preRefinementState.analyzeResult,
                 },
                 stageStatus: {
                     ...popupState.pipeline.stageStatus,
-                    analyze: 'complete', // Restore status
+                    analyze: 'complete',
                 },
+                isRefining: preRefinementState.iterationCount > 0,
             };
 
             if (result.error !== 'Generation cancelled') {
@@ -1461,19 +1487,20 @@ async function runRefinement(): Promise<void> {
             }
         }
     } catch (e) {
-        // Restore on exception too
+        // Restore previous state on exception
         popupState.pipeline = {
             ...popupState.pipeline,
             iterationCount: preRefinementState.iterationCount,
             iterationHistory: preRefinementState.iterationHistory,
             results: {
                 ...popupState.pipeline.results,
-                analyze: stateForGeneration.results.analyze,
+                analyze: preRefinementState.analyzeResult,
             },
             stageStatus: {
                 ...popupState.pipeline.stageStatus,
                 analyze: 'complete',
             },
+            isRefining: preRefinementState.iterationCount > 0,
         };
 
         toastr.error((e as Error).message);

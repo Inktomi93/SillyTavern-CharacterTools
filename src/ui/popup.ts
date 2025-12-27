@@ -91,7 +91,7 @@ import {
 import { renderResultsPanel, updateResultsPanelState, renderRefinementLoading } from './components/results-panel';
 import { renderIterationHistory, updateIterationHistoryState, renderIterationViewContent } from './components/iteration-history';
 import { openSettingsModal } from './settings-modal';
-import { saveIterationHistory, loadIterationHistory } from '../persistence';
+import { saveIterationHistory, loadIterationHistory, clearIterationHistory } from '../persistence';
 import type { PipelineState, StageName, Character, IterationSnapshot } from '../types';
 
 // ============================================================================
@@ -367,10 +367,19 @@ export async function openMainPopup(): Promise<void> {
         cancelButton: false,
     });
 
-    popup.show().then(() => {
+    popup.show().then(async () => {  // ADD async
         if (popupState?.abortController) {
             popupState.abortController.abort();
         }
+
+        // ADDED: Clear iteration history on close
+        if (popupState?.pipeline.character) {
+            await clearIterationHistory(popupState.pipeline.character);
+            debugLog('info', 'Iteration history cleared on popup close', {
+                character: popupState.pipeline.character.name,
+            });
+        }
+
         unsubscribeEvents();
         removeGlobalListeners();
         clearTokenCache();

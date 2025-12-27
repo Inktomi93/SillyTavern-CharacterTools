@@ -165,17 +165,35 @@ export function updateResultsPanelState(
     nextStage: StageName | null,
     pipeline: PipelineState,
 ): void {
+    // DEBUG
+    console.log('[CT DEBUG] updateResultsPanelState', {
+        stage,
+        hasResult: !!result,
+        resultTimestamp: result?.timestamp,
+        status,
+        isGenerating,
+        nextStage,
+        pipelineIsRefining: pipeline.isRefining,
+        pipelineHasRewrite: !!pipeline.results.rewrite,
+        pipelineHasAnalyze: !!pipeline.results.analyze,
+    });
+
     const shouldShowLoading = isGenerating && status === 'running';
     const shouldShowResult = result && !shouldShowLoading;
     const shouldShowPlaceholder = !result && !shouldShowLoading;
 
+    // DEBUG
+    console.log('[CT DEBUG] Display state', { shouldShowLoading, shouldShowResult, shouldShowPlaceholder });
+
     // Always re-render if state type changes OR if showing placeholder (stage name might have changed)
     if (shouldShowLoading) {
+        console.log('[CT DEBUG] Rendering loading state');
         container.innerHTML = renderLoading(stage);
         return;
     }
 
     if (shouldShowPlaceholder) {
+        console.log('[CT DEBUG] Rendering placeholder state');
         container.innerHTML = renderPlaceholder(stage, status);
         return;
     }
@@ -186,6 +204,14 @@ export function updateResultsPanelState(
         const existingTimestamp = container.querySelector(`.${MODULE_NAME}_results_time`)?.textContent;
         const newTimestamp = new Date(result.timestamp).toLocaleTimeString();
 
+        // DEBUG
+        console.log('[CT DEBUG] Result render check', {
+            hasExistingContent: !!existingContent,
+            existingTimestamp,
+            newTimestamp,
+            willRerender: !existingContent || existingTimestamp !== newTimestamp,
+        });
+
         if (!existingContent || existingTimestamp !== newTimestamp) {
             container.innerHTML = renderResult(stage, result);
         }
@@ -193,19 +219,19 @@ export function updateResultsPanelState(
 
     // Update footer actions
     const footer = container.querySelector(`#${MODULE_NAME}_results_footer`);
+
+    // DEBUG
+    console.log('[CT DEBUG] Footer update', {
+        footerFound: !!footer,
+        hasResult: !!result,
+        willUpdateFooter: !!(footer && result),
+    });
+
     if (footer && result) {
         footer.innerHTML = renderFooterActions(stage, result, nextStage, pipeline);
     }
-
-    // Update lock/unlock button visibility
-    const lockBtn = container.querySelector(`#${MODULE_NAME}_lock_btn`);
-    const unlockBtn = container.querySelector(`#${MODULE_NAME}_unlock_btn`);
-
-    if (lockBtn && unlockBtn) {
-        lockBtn.classList.toggle('hidden', !!result?.locked);
-        unlockBtn.classList.toggle('hidden', !result?.locked);
-    }
 }
+
 
 function renderFooterActions(
     stage: StageName,
@@ -213,6 +239,21 @@ function renderFooterActions(
     nextStage: StageName | null,
     pipeline: PipelineState,
 ): string {
+    // DEBUG
+    console.log('[CT DEBUG] renderFooterActions called', {
+        stage,
+        nextStage,
+        resultLocked: result.locked,
+        pipeline: {
+            isRefining: pipeline.isRefining,
+            hasCharacter: !!pipeline.character,
+            hasRewrite: !!pipeline.results.rewrite,
+            rewriteLocked: pipeline.results.rewrite?.locked,
+            hasAnalyze: !!pipeline.results.analyze,
+            iterationCount: pipeline.iterationCount,
+        },
+    });
+
     const actions: string[] = [];
 
     // Regenerate (if not locked)
@@ -227,6 +268,7 @@ function renderFooterActions(
 
     // Stage-specific actions
     if (stage === 'rewrite' && pipeline.isRefining && !pipeline.results.analyze) {
+        console.log('[CT DEBUG] Adding "Analyze This Rewrite" button');
         // After refinement completes, prompt user to analyze the new rewrite
         actions.push(`
       <button id="${MODULE_NAME}_run_analyze_btn" class="menu_button ${MODULE_NAME}_continue_btn">
@@ -240,8 +282,16 @@ function renderFooterActions(
         const verdict = extractVerdict(result.response);
         const canRefineResult = canRefine(pipeline);
 
+        // DEBUG
+        console.log('[CT DEBUG] Analyze stage actions', {
+            verdict,
+            canRefineResult,
+            hasUnlockedRewrite: pipeline.results.rewrite && !pipeline.results.rewrite.locked,
+        });
+
         // Refine button (if we can refine)
         if (canRefineResult.canRun) {
+            console.log('[CT DEBUG] Adding Refine button');
             const isRecommended = verdict === 'needs_refinement';
             actions.push(`
         <button id="${MODULE_NAME}_refine_btn" class="menu_button ${isRecommended ? MODULE_NAME + '_refine_recommended' : ''}">
@@ -250,10 +300,13 @@ function renderFooterActions(
           ${pipeline.iterationCount > 0 ? `<span class="${MODULE_NAME}_iteration_badge">#${pipeline.iterationCount + 1}</span>` : ''}
         </button>
       `);
+        } else {
+            console.log('[CT DEBUG] NOT adding Refine button, reason:', canRefineResult.reason);
         }
 
         // Accept button (if we have an unlocked rewrite)
         if (pipeline.results.rewrite && !pipeline.results.rewrite.locked) {
+            console.log('[CT DEBUG] Adding Accept button');
             const isRecommended = verdict === 'accept';
             actions.push(`
         <button id="${MODULE_NAME}_accept_btn" class="menu_button ${isRecommended ? MODULE_NAME + '_accept_recommended' : ''}">
@@ -266,6 +319,7 @@ function renderFooterActions(
 
     // Continue to next stage (not on analyze, not when in refinement mode on rewrite)
     if (nextStage && stage !== 'analyze' && !(stage === 'rewrite' && pipeline.isRefining)) {
+        console.log('[CT DEBUG] Adding Continue button to', nextStage);
         actions.push(`
       <button id="${MODULE_NAME}_continue_btn" class="menu_button ${MODULE_NAME}_continue_btn">
         <i class="fa-solid fa-arrow-right"></i>
@@ -283,6 +337,9 @@ function renderFooterActions(
       </button>
     `);
     }
+
+    // DEBUG
+    console.log('[CT DEBUG] Final actions:', actions.length, 'buttons');
 
     return `<div class="${MODULE_NAME}_footer_actions">${actions.join('')}</div>`;
 }

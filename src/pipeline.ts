@@ -257,7 +257,7 @@ export function canRunStage(state: PipelineState, stage: StageName): { canRun: b
             return { canRun: true };
 
         case 'rewrite':
-            if (state.selectedStages.includes('score') && !state.results.score?.locked) {
+            if (state.selectedStages.includes('score') && !state.results.score) {
                 return {
                     canRun: true,
                     reason: 'Score stage not complete - rewrite will run without score feedback',

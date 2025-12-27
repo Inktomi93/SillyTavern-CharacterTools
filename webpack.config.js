@@ -7,7 +7,7 @@ const __dirname =
 
 export default {
     mode: 'production',
-    devtool: 'source-map', // Optional: generates .map file for debugging
+    devtool: 'source-map',
     entry: path.join(__dirname, 'src/index.ts'),
     output: {
         path: path.join(__dirname, 'dist/'),
@@ -26,6 +26,7 @@ export default {
         ],
     },
     optimization: {
+        splitChunks: false,
         minimizer: [
             new TerserPlugin({
                 extractComments: false,

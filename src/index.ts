@@ -6,6 +6,7 @@ import { getSettings } from './settings';
 import { initPanel } from './ui/panel';
 import { debugLog, logError } from './debug';
 import { VERSION } from './constants';
+import { testPipelineFlow } from './tests/pipeline-flow-test';
 
 function init(): void {
     try {
@@ -13,6 +14,12 @@ function init(): void {
 
         initPanel();
         registerEventListeners();
+
+        // Load test utilities in debug mode
+        if (getSettings().debugMode) {
+            (window as unknown as { testPipelineFlow: typeof testPipelineFlow }).testPipelineFlow = testPipelineFlow;
+            debugLog('info', 'Test utilities loaded: window.testPipelineFlow()', null);
+        }
 
         debugLog('info', 'Extension loaded', getSettings());
     } catch (error) {
@@ -24,7 +31,6 @@ function init(): void {
 function registerEventListeners(): void {
     const { eventSource, eventTypes } = SillyTavern.getContext();
 
-    // Log API changes for debugging
     eventSource.on(eventTypes.CHATCOMPLETION_SOURCE_CHANGED, () => {
         debugLog('info', 'Chat completion source changed', null);
     });

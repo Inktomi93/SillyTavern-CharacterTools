@@ -1,7 +1,48 @@
 // src/ui/popup.ts
 //
 // Main popup controller - orchestrates all components and manages state.
-
+// TODO: this file is a war crime and needs to be split up. I KNOW, I KNOW ITS A CHONGUS, SORRY NOT SORRY IM TIRED OF REWRITING IT.
+// ==========================================================================
+// TODO: REFACTOR - Split this 1400+ line monstrosity into manageable pieces
+// ==========================================================================
+//
+// Proposed structure:
+//
+// src/ui/popup/
+// ├── index.ts              - Main entry point, exports openMainPopup()
+// ├── state.ts              - popupState management, getState(), setState()
+// ├── lifecycle.ts          - open/close, subscribeEvents(), unsubscribeEvents()
+// ├── keyboard.ts           - Global keyboard handlers (Ctrl+Enter, Escape)
+// ├── generation.ts         - runSingleStage(), runSelectedStages(), runRefinement()
+// ├── handlers/
+// │   ├── character.ts      - Character selection, field toggles, search
+// │   ├── pipeline.ts       - Stage toggles, run buttons, reset
+// │   ├── stage-config.ts   - Prompt/schema editing, preset selection, preview
+// │   ├── results.ts        - Lock/unlock, copy, export, continue, refine, accept
+// │   └── iteration.ts      - Revert, view history
+// └── updaters.ts           - All update*() functions for UI sync
+//
+// Migration steps:
+// 1. Extract popupState + getter/setter to state.ts
+// 2. Extract event subscription to lifecycle.ts
+// 3. Extract keyboard handling to keyboard.ts
+// 4. Extract generation logic to generation.ts (biggest win - complex async)
+// 5. Extract handler groups one at a time to handlers/
+// 6. Extract update functions to updaters.ts
+// 7. index.ts imports and wires everything together
+//
+// Each file should:
+// - Import state from state.ts (not hold its own copy)
+// - Export pure functions that take/return state, or side-effect functions
+// - Keep handler functions small and focused
+//
+// Benefits:
+// - Testable generation logic in isolation
+// - Handler functions become ~20-50 lines each
+// - State mutations centralized and traceable
+// - Easier to add new features without scrolling 1400 lines
+//
+// ==========================================================================
 import { MODULE_NAME, STAGES, STAGE_LABELS, STAGE_ICONS } from '../constants';
 import { debugLog, logError } from '../debug';
 import {

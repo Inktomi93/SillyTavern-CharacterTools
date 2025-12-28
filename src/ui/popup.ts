@@ -448,42 +448,53 @@ function buildPopupContent(): string {
         </div>
       </div>
 
-      <!-- Character Section -->
-      <div class="${MODULE_NAME}_section" id="${MODULE_NAME}_character_section">
-        <div class="${MODULE_NAME}_section_header">
-          <i class="fa-solid fa-user"></i>
-          <span>Character</span>
-        </div>
-        <div id="${MODULE_NAME}_character_select_container"></div>
-      </div>
+      <!-- Main Content - Two columns on desktop -->
+      <div class="${MODULE_NAME}_main_content">
+        <!-- Left Column: Character + Pipeline + Stage Config -->
+        <div class="${MODULE_NAME}_left_column">
+          <!-- Character Section -->
+          <div class="${MODULE_NAME}_section" id="${MODULE_NAME}_character_section">
+            <div class="${MODULE_NAME}_section_header">
+              <i class="fa-solid fa-user"></i>
+              <span>Character</span>
+            </div>
+            <div id="${MODULE_NAME}_character_select_container"></div>
+          </div>
 
-      <!-- Pipeline Section -->
-      <div class="${MODULE_NAME}_section" id="${MODULE_NAME}_pipeline_section">
-        <div class="${MODULE_NAME}_section_header">
-          <i class="fa-solid fa-diagram-project"></i>
-          <span>Pipeline</span>
-        </div>
-        <div id="${MODULE_NAME}_pipeline_nav_container"></div>
-      </div>
+          <!-- Pipeline Section -->
+          <div class="${MODULE_NAME}_section" id="${MODULE_NAME}_pipeline_section">
+            <div class="${MODULE_NAME}_section_header">
+              <i class="fa-solid fa-diagram-project"></i>
+              <span>Pipeline</span>
+            </div>
+            <div id="${MODULE_NAME}_pipeline_nav_container"></div>
+          </div>
 
-      <!-- Stage Config Section -->
-      <div class="${MODULE_NAME}_section" id="${MODULE_NAME}_stage_section">
-        <div class="${MODULE_NAME}_section_header">
-          <i class="fa-solid ${STAGE_ICONS.score}" id="${MODULE_NAME}_stage_icon"></i>
-          <span id="${MODULE_NAME}_stage_title">Score</span>
+          <!-- Stage Config Section -->
+          <div class="${MODULE_NAME}_section" id="${MODULE_NAME}_stage_section">
+            <div class="${MODULE_NAME}_section_header">
+              <i class="fa-solid ${STAGE_ICONS.score}" id="${MODULE_NAME}_stage_icon"></i>
+              <span id="${MODULE_NAME}_stage_title">Score</span>
+            </div>
+            <div id="${MODULE_NAME}_stage_config_container"></div>
+          </div>
         </div>
-        <div id="${MODULE_NAME}_stage_config_container"></div>
-      </div>
 
-      <!-- Results Section -->
-      <div class="${MODULE_NAME}_section ${MODULE_NAME}_section_grow" id="${MODULE_NAME}_results_section">
-        <div class="${MODULE_NAME}_section_header">
-          <i class="fa-solid fa-file-lines"></i>
-          <span>Results</span>
-          <span id="${MODULE_NAME}_iteration_indicator" class="${MODULE_NAME}_iteration_indicator hidden"></span>
+        <!-- Right Column: Results + Iteration History -->
+        <div class="${MODULE_NAME}_right_column">
+          <!-- Results Section -->
+          <div class="${MODULE_NAME}_section ${MODULE_NAME}_section_grow" id="${MODULE_NAME}_results_section">
+            <div class="${MODULE_NAME}_section_header">
+              <i class="fa-solid fa-file-lines"></i>
+              <span>Results</span>
+              <span id="${MODULE_NAME}_iteration_indicator" class="${MODULE_NAME}_iteration_indicator hidden"></span>
+            </div>
+            <div id="${MODULE_NAME}_results_container"></div>
+          </div>
+
+          <!-- Iteration History -->
+          <div id="${MODULE_NAME}_iteration_history_container"></div>
         </div>
-        <div id="${MODULE_NAME}_results_container"></div>
-        <div id="${MODULE_NAME}_iteration_history_container"></div>
       </div>
     </div>
   `;

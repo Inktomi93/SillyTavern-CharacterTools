@@ -152,12 +152,39 @@
 }
 
 /* Left column container */
+/* Left column should fill height and scroll internally */
 .character_tools_left_column {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
+  overflow: hidden; /* Don't scroll the column itself */
+}
+
+/* Character section - compact, doesn't need to grow */
+#character_tools_character_section {
+  flex-shrink: 0;
+}
+
+/* Pipeline section - compact, doesn't need to grow */
+#character_tools_pipeline_section {
+  flex-shrink: 0;
+}
+
+/* Stage config section - takes remaining space and scrolls */
+#character_tools_stage_section {
+  flex: 1;
+  min-height: 200px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Stage config container should scroll */
+#character_tools_stage_config_container {
+  flex: 1;
   overflow-y: auto;
+  min-height: 0;
 }
 
 /* Right column container */
@@ -617,48 +644,59 @@
 }
 
 /* ============================================================================
-   PIPELINE NAV
+   PIPELINE - Fill width properly
    ============================================================================ */
 
 .character_tools_pipeline_nav {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
 }
 
+/* Stage row fills width */
 .character_tools_stage_row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
 }
 
+/* Stage node wrapper */
 .character_tools_stage_node {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex: 1;
+  min-width: 0;
 }
 
+/* Checkbox doesn't grow */
 .character_tools_stage_checkbox {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   cursor: pointer;
   accent-color: var(--SmartThemeQuoteColor);
   flex-shrink: 0;
 }
 
+/* Stage buttons grow to fill space */
 .character_tools_stage_btn {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  min-height: 28px;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  min-height: 32px;
+  flex: 1;
+  min-width: 0;
   background: var(--SmartThemeBlurTintColor);
   border: 1px solid var(--SmartThemeBorderColor);
   border-radius: 4px;
   cursor: pointer;
   color: var(--SmartThemeBodyColor);
-  font-size: 0.8em;
+  font-size: 0.85em;
   font-family: var(--mainFontFamily);
   transition: all var(--ct-transition);
 }
@@ -673,8 +711,9 @@
   color: var(--SmartThemeBlurTintColor);
 }
 
+/* Always show stage labels */
 .character_tools_stage_btn span {
-  display: none;
+  display: inline;
 }
 
 .character_tools_status_icon {
@@ -690,11 +729,11 @@
   color: var(--warning, #f39c12);
 }
 
+/* Connectors stay fixed width */
 .character_tools_stage_connector {
-  width: 10px;
+  width: 16px;
   height: 2px;
   background: var(--SmartThemeBorderColor);
-  margin: 0 2px;
   flex-shrink: 0;
 }
 
@@ -702,18 +741,18 @@
   background: var(--SmartThemeQuoteColor);
 }
 
-/* Pipeline Actions */
+/* Pipeline actions fill width */
 .character_tools_pipeline_actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
+  width: 100%;
 }
 
 .character_tools_pipeline_actions .menu_button {
-  flex: 1 1 auto;
-  min-width: 80px;
-  padding: 4px 8px;
-  font-size: 0.8em;
+  flex: 1;
+  justify-content: center;
+  padding: 6px 10px;
+  font-size: 0.85em;
 }
 
 /* ============================================================================
@@ -2051,10 +2090,8 @@
 
   /* Left column: 40% of space, min 350px, max 500px */
   .character_tools_left_column {
-    flex: 0 0 40%;
-    min-width: 350px;
-    max-width: 500px;
-    overflow-y: auto;
+    height: 100%;
+    max-height: 100%;
   }
 
   /* Right column: fills remaining space */
@@ -2074,6 +2111,12 @@
 
   .character_tools_schema_textarea {
     min-height: 80px;
+  }
+
+  /* Ensure stage config grows properly */
+  #character_tools_stage_section {
+    flex: 1;
+    min-height: 250px;
   }
 
   .character_tools_iteration_list {

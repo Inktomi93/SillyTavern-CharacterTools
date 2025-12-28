@@ -83,257 +83,266 @@ function buildSettingsContent(): string {
         <span>Character Tools Settings</span>
       </div>
 
-      <!-- Generation Settings -->
-      <div class="${MODULE_NAME}_settings_section">
-        <div class="${MODULE_NAME}_settings_section_header">
-          <i class="fa-solid fa-microchip"></i>
-          <span>Generation</span>
-        </div>
+      <div class="${MODULE_NAME}_settings_content">
+        <!-- LEFT COLUMN -->
+        <div class="${MODULE_NAME}_settings_column">
 
-        <div class="${MODULE_NAME}_settings_row">
-          <label class="${MODULE_NAME}_checkbox_label">
-            <input
-              type="checkbox"
-              id="${MODULE_NAME}_use_current_settings"
-              ${settings.useCurrentSettings ? 'checked' : ''}
-            >
-            <span>Use Current SillyTavern Settings</span>
-          </label>
-        </div>
-
-        <div id="${MODULE_NAME}_custom_gen_config" class="${settings.useCurrentSettings ? 'hidden' : ''}">
-          <div class="${MODULE_NAME}_settings_grid">
-            <div class="${MODULE_NAME}_settings_field">
-              <label>Source</label>
-              <select id="${MODULE_NAME}_gen_source" class="text_pole"></select>
+          <!-- Generation Settings -->
+          <div class="${MODULE_NAME}_settings_section">
+            <div class="${MODULE_NAME}_settings_section_header">
+              <i class="fa-solid fa-microchip"></i>
+              <span>Generation</span>
             </div>
-            <div class="${MODULE_NAME}_settings_field">
-              <label>Model</label>
-              <select id="${MODULE_NAME}_gen_model" class="text_pole"></select>
+
+            <div class="${MODULE_NAME}_settings_row">
+              <label class="${MODULE_NAME}_checkbox_label">
+                <input
+                  type="checkbox"
+                  id="${MODULE_NAME}_use_current_settings"
+                  ${settings.useCurrentSettings ? 'checked' : ''}
+                >
+                <span>Use Current SillyTavern Settings</span>
+              </label>
+            </div>
+
+            <div id="${MODULE_NAME}_custom_gen_config" class="${settings.useCurrentSettings ? 'hidden' : ''}">
+              <div class="${MODULE_NAME}_settings_grid">
+                <div class="${MODULE_NAME}_settings_field">
+                  <label>Source</label>
+                  <select id="${MODULE_NAME}_gen_source" class="text_pole"></select>
+                </div>
+                <div class="${MODULE_NAME}_settings_field">
+                  <label>Model</label>
+                  <select id="${MODULE_NAME}_gen_model" class="text_pole"></select>
+                </div>
+              </div>
+
+              <div class="${MODULE_NAME}_settings_grid ${MODULE_NAME}_settings_grid_5">
+                <div class="${MODULE_NAME}_settings_field">
+                  <label>Temp</label>
+                  <input type="number" id="${MODULE_NAME}_gen_temp" class="text_pole" value="${config.temperature}" min="0" max="2" step="0.1">
+                </div>
+                <div class="${MODULE_NAME}_settings_field">
+                  <label>Max Tokens</label>
+                  <input type="number" id="${MODULE_NAME}_gen_tokens" class="text_pole" value="${config.maxTokens}" min="100" max="32000" step="100">
+                </div>
+                <div class="${MODULE_NAME}_settings_field">
+                  <label>Freq Pen</label>
+                  <input type="number" id="${MODULE_NAME}_gen_freq" class="text_pole" value="${config.frequencyPenalty}" min="-2" max="2" step="0.1">
+                </div>
+                <div class="${MODULE_NAME}_settings_field">
+                  <label>Pres Pen</label>
+                  <input type="number" id="${MODULE_NAME}_gen_pres" class="text_pole" value="${config.presencePenalty}" min="-2" max="2" step="0.1">
+                </div>
+                <div class="${MODULE_NAME}_settings_field">
+                  <label>Top P</label>
+                  <input type="number" id="${MODULE_NAME}_gen_top_p" class="text_pole" value="${config.topP}" min="0" max="1" step="0.05">
+                </div>
+              </div>
             </div>
           </div>
 
-          <div class="${MODULE_NAME}_settings_grid ${MODULE_NAME}_settings_grid_5">
-            <div class="${MODULE_NAME}_settings_field">
-              <label>Temp</label>
-              <input type="number" id="${MODULE_NAME}_gen_temp" class="text_pole" value="${config.temperature}" min="0" max="2" step="0.1">
+          <!-- System Prompt -->
+          <div class="${MODULE_NAME}_settings_section">
+            <div class="${MODULE_NAME}_settings_section_header">
+              <i class="fa-solid fa-message"></i>
+              <span>System Prompt</span>
             </div>
-            <div class="${MODULE_NAME}_settings_field">
-              <label>Max Tokens</label>
-              <input type="number" id="${MODULE_NAME}_gen_tokens" class="text_pole" value="${config.maxTokens}" min="100" max="32000" step="100">
-            </div>
-            <div class="${MODULE_NAME}_settings_field">
-              <label>Freq Pen</label>
-              <input type="number" id="${MODULE_NAME}_gen_freq" class="text_pole" value="${config.frequencyPenalty}" min="-2" max="2" step="0.1">
-            </div>
-            <div class="${MODULE_NAME}_settings_field">
-              <label>Pres Pen</label>
-              <input type="number" id="${MODULE_NAME}_gen_pres" class="text_pole" value="${config.presencePenalty}" min="-2" max="2" step="0.1">
-            </div>
-            <div class="${MODULE_NAME}_settings_field">
-              <label>Top P</label>
-              <input type="number" id="${MODULE_NAME}_gen_top_p" class="text_pole" value="${config.topP}" min="0" max="1" step="0.05">
-            </div>
-          </div>
-        </div>
-      </div>
 
-      <!-- System Prompt -->
-      <div class="${MODULE_NAME}_settings_section">
-        <div class="${MODULE_NAME}_settings_section_header">
-          <i class="fa-solid fa-message"></i>
-          <span>System Prompt</span>
-        </div>
-
-        <p class="${MODULE_NAME}_settings_hint">
-          The system prompt is sent with every generation. Base prompt provides core instructions,
-          your additions are appended after.
-        </p>
-
-        <!-- User additions (main) -->
-        <div class="${MODULE_NAME}_settings_subsection">
-          <label class="${MODULE_NAME}_settings_label">Your Additions</label>
-          <textarea
-            id="${MODULE_NAME}_user_system_prompt"
-            class="text_pole ${MODULE_NAME}_system_prompt_textarea"
-            rows="4"
-            placeholder="Add your custom instructions here..."
-          >${escapeHtml(settings.userSystemPrompt || '')}</textarea>
-          <div class="${MODULE_NAME}_settings_row_spread">
-            <span id="${MODULE_NAME}_user_system_prompt_chars">${(settings.userSystemPrompt || '').length} chars</span>
-            <button id="${MODULE_NAME}_clear_user_system_prompt" class="menu_button">
-              <i class="fa-solid fa-eraser"></i>
-              Clear
-            </button>
-          </div>
-        </div>
-
-        <!-- Base prompt (collapsible advanced) -->
-        <details class="${MODULE_NAME}_settings_advanced">
-          <summary>
-            <i class="fa-solid fa-caret-right"></i>
-            Base Prompt (Advanced)
-          </summary>
-          <div class="${MODULE_NAME}_settings_advanced_content">
-            <p class="${MODULE_NAME}_settings_hint ${MODULE_NAME}_settings_warning">
-              ⚠️ Editing the base prompt may affect all stages. Reset to restore defaults.
+            <p class="${MODULE_NAME}_settings_hint">
+              The system prompt is sent with every generation. Base prompt provides core instructions,
+              your additions are appended after.
             </p>
-            <textarea
-              id="${MODULE_NAME}_base_system_prompt"
-              class="text_pole ${MODULE_NAME}_system_prompt_textarea"
-              rows="6"
-            >${escapeHtml(settings.baseSystemPrompt || '')}</textarea>
+
+            <div class="${MODULE_NAME}_settings_subsection">
+              <label class="${MODULE_NAME}_settings_label">Your Additions</label>
+              <textarea
+                id="${MODULE_NAME}_user_system_prompt"
+                class="text_pole ${MODULE_NAME}_system_prompt_textarea"
+                rows="4"
+                placeholder="Add your custom instructions here..."
+              >${escapeHtml(settings.userSystemPrompt || '')}</textarea>
+              <div class="${MODULE_NAME}_settings_row_spread">
+                <span id="${MODULE_NAME}_user_system_prompt_chars">${(settings.userSystemPrompt || '').length} chars</span>
+                <button id="${MODULE_NAME}_clear_user_system_prompt" class="menu_button">
+                  <i class="fa-solid fa-eraser"></i>
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <details class="${MODULE_NAME}_settings_advanced">
+              <summary>
+                <i class="fa-solid fa-caret-right"></i>
+                Base Prompt (Advanced)
+              </summary>
+              <div class="${MODULE_NAME}_settings_advanced_content">
+                <p class="${MODULE_NAME}_settings_hint ${MODULE_NAME}_settings_warning">
+                  ⚠️ Editing the base prompt may affect all stages. Reset to restore defaults.
+                </p>
+                <textarea
+                  id="${MODULE_NAME}_base_system_prompt"
+                  class="text_pole ${MODULE_NAME}_system_prompt_textarea"
+                  rows="6"
+                >${escapeHtml(settings.baseSystemPrompt || '')}</textarea>
+                <div class="${MODULE_NAME}_settings_row_spread">
+                  <span id="${MODULE_NAME}_base_system_prompt_chars">${(settings.baseSystemPrompt || '').length} chars</span>
+                  <button id="${MODULE_NAME}_reset_base_system_prompt" class="menu_button">
+                    <i class="fa-solid fa-rotate-left"></i>
+                    Reset
+                  </button>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <!-- Refinement Prompt -->
+          <div class="${MODULE_NAME}_settings_section">
+            <div class="${MODULE_NAME}_settings_section_header">
+              <i class="fa-solid fa-arrows-rotate"></i>
+              <span>Refinement Prompt</span>
+            </div>
+
+            <p class="${MODULE_NAME}_settings_hint">
+              Instructions for the refinement loop. Base provides core guidance, your additions are appended.
+            </p>
+
+            <div class="${MODULE_NAME}_settings_subsection">
+              <label class="${MODULE_NAME}_settings_label">Your Additions</label>
+              <textarea
+                id="${MODULE_NAME}_user_refinement_prompt"
+                class="text_pole ${MODULE_NAME}_system_prompt_textarea"
+                rows="4"
+                placeholder="Add your refinement instructions here..."
+              >${escapeHtml(settings.userRefinementPrompt || '')}</textarea>
+              <div class="${MODULE_NAME}_settings_row_spread">
+                <span id="${MODULE_NAME}_user_refinement_prompt_chars">${(settings.userRefinementPrompt || '').length} chars</span>
+                <button id="${MODULE_NAME}_clear_user_refinement_prompt" class="menu_button">
+                  <i class="fa-solid fa-eraser"></i>
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <details class="${MODULE_NAME}_settings_advanced">
+              <summary>
+                <i class="fa-solid fa-caret-right"></i>
+                Base Prompt (Advanced)
+              </summary>
+              <div class="${MODULE_NAME}_settings_advanced_content">
+                <textarea
+                  id="${MODULE_NAME}_base_refinement_prompt"
+                  class="text_pole ${MODULE_NAME}_system_prompt_textarea"
+                  rows="6"
+                >${escapeHtml(settings.baseRefinementPrompt || '')}</textarea>
+                <div class="${MODULE_NAME}_settings_row_spread">
+                  <span id="${MODULE_NAME}_base_refinement_prompt_chars">${(settings.baseRefinementPrompt || '').length} chars</span>
+                  <button id="${MODULE_NAME}_reset_base_refinement_prompt" class="menu_button">
+                    <i class="fa-solid fa-rotate-left"></i>
+                    Reset
+                  </button>
+                </div>
+              </div>
+            </details>
+          </div>
+
+        </div>
+
+        <!-- RIGHT COLUMN -->
+        <div class="${MODULE_NAME}_settings_column">
+
+          <!-- Preset Management -->
+          <div class="${MODULE_NAME}_settings_section">
+            <div class="${MODULE_NAME}_settings_section_header">
+              <i class="fa-solid fa-bookmark"></i>
+              <span>Presets</span>
+            </div>
+
+            <div class="${MODULE_NAME}_presets_grid">
+              <div class="${MODULE_NAME}_preset_column">
+                <h4>Prompt Presets</h4>
+                <div id="${MODULE_NAME}_prompt_presets_list" class="${MODULE_NAME}_preset_list">
+                  ${renderPresetList('prompt')}
+                </div>
+              </div>
+              <div class="${MODULE_NAME}_preset_column">
+                <h4>Schema Presets</h4>
+                <div id="${MODULE_NAME}_schema_presets_list" class="${MODULE_NAME}_preset_list">
+                  ${renderPresetList('schema')}
+                </div>
+              </div>
+            </div>
+
             <div class="${MODULE_NAME}_settings_row_spread">
-              <span id="${MODULE_NAME}_base_system_prompt_chars">${(settings.baseSystemPrompt || '').length} chars</span>
-              <button id="${MODULE_NAME}_reset_base_system_prompt" class="menu_button">
-                <i class="fa-solid fa-rotate-left"></i>
-                Reset
+              <button id="${MODULE_NAME}_export_presets" class="menu_button">
+                <i class="fa-solid fa-file-export"></i>
+                Export Custom
+              </button>
+              <button id="${MODULE_NAME}_import_presets" class="menu_button">
+                <i class="fa-solid fa-file-import"></i>
+                Import
               </button>
             </div>
           </div>
-        </details>
 
-      <!-- Refinement Prompt -->
-      <div class="${MODULE_NAME}_settings_section">
-        <div class="${MODULE_NAME}_settings_section_header">
-          <i class="fa-solid fa-arrows-rotate"></i>
-          <span>Refinement Prompt</span>
-        </div>
+          <!-- Keyboard Shortcuts -->
+          <div class="${MODULE_NAME}_settings_section">
+            <div class="${MODULE_NAME}_settings_section_header">
+              <i class="fa-solid fa-keyboard"></i>
+              <span>Keyboard Shortcuts</span>
+            </div>
 
-        <p class="${MODULE_NAME}_settings_hint">
-          Instructions for the refinement loop. Base provides core guidance, your additions are appended.
-        </p>
-
-        <!-- User additions -->
-        <div class="${MODULE_NAME}_settings_subsection">
-          <label class="${MODULE_NAME}_settings_label">Your Additions</label>
-          <textarea
-            id="${MODULE_NAME}_user_refinement_prompt"
-            class="text_pole ${MODULE_NAME}_system_prompt_textarea"
-            rows="4"
-            placeholder="Add your refinement instructions here..."
-          >${escapeHtml(settings.userRefinementPrompt || '')}</textarea>
-          <div class="${MODULE_NAME}_settings_row_spread">
-            <span id="${MODULE_NAME}_user_refinement_prompt_chars">${(settings.userRefinementPrompt || '').length} chars</span>
-            <button id="${MODULE_NAME}_clear_user_refinement_prompt" class="menu_button">
-              <i class="fa-solid fa-eraser"></i>
-              Clear
-            </button>
+            <div class="${MODULE_NAME}_shortcuts_list">
+              <div class="${MODULE_NAME}_shortcut_item">
+                <kbd>Ctrl</kbd> + <kbd>Enter</kbd>
+                <span>Run current stage</span>
+              </div>
+              <div class="${MODULE_NAME}_shortcut_item">
+                <kbd>Escape</kbd>
+                <span>Cancel generation</span>
+              </div>
+            </div>
           </div>
-        </div>
 
-        <!-- Base prompt (collapsible) -->
-        <details class="${MODULE_NAME}_settings_advanced">
-          <summary>
-            <i class="fa-solid fa-caret-right"></i>
-            Base Prompt (Advanced)
-          </summary>
-          <div class="${MODULE_NAME}_settings_advanced_content">
-            <textarea
-              id="${MODULE_NAME}_base_refinement_prompt"
-              class="text_pole ${MODULE_NAME}_system_prompt_textarea"
-              rows="6"
-            >${escapeHtml(settings.baseRefinementPrompt || '')}</textarea>
-            <div class="${MODULE_NAME}_settings_row_spread">
-              <span id="${MODULE_NAME}_base_refinement_prompt_chars">${(settings.baseRefinementPrompt || '').length} chars</span>
-              <button id="${MODULE_NAME}_reset_base_refinement_prompt" class="menu_button">
-                <i class="fa-solid fa-rotate-left"></i>
-                Reset
+          <!-- Debug -->
+          <div class="${MODULE_NAME}_settings_section">
+            <div class="${MODULE_NAME}_settings_section_header">
+              <i class="fa-solid fa-bug"></i>
+              <span>Debug</span>
+            </div>
+
+            <div class="${MODULE_NAME}_settings_row">
+              <label class="${MODULE_NAME}_checkbox_label">
+                <input
+                  type="checkbox"
+                  id="${MODULE_NAME}_debug_mode"
+                  ${settings.debugMode ? 'checked' : ''}
+                >
+                <span>Enable Debug Logging</span>
+              </label>
+            </div>
+
+            <div class="${MODULE_NAME}_debug_actions">
+              <button id="${MODULE_NAME}_view_logs" class="menu_button">
+                <i class="fa-solid fa-list"></i>
+                View Logs
+              </button>
+              <button id="${MODULE_NAME}_clear_logs" class="menu_button">
+                <i class="fa-solid fa-trash"></i>
+                Clear
+              </button>
+              <button id="${MODULE_NAME}_copy_debug_info" class="menu_button">
+                <i class="fa-solid fa-copy"></i>
+                Copy Info
               </button>
             </div>
-          </div>
-        </details>
-      </div>
 
-      <!-- Preset Management -->
-      <div class="${MODULE_NAME}_settings_section">
-        <div class="${MODULE_NAME}_settings_section_header">
-          <i class="fa-solid fa-bookmark"></i>
-          <span>Presets</span>
-        </div>
-
-        <div class="${MODULE_NAME}_presets_grid">
-          <div class="${MODULE_NAME}_preset_column">
-            <h4>Prompt Presets</h4>
-            <div id="${MODULE_NAME}_prompt_presets_list" class="${MODULE_NAME}_preset_list">
-              ${renderPresetList('prompt')}
+            <div id="${MODULE_NAME}_debug_log_viewer" class="${MODULE_NAME}_debug_log_viewer hidden">
+              <div id="${MODULE_NAME}_debug_log_list" class="${MODULE_NAME}_debug_log_list"></div>
+              <pre id="${MODULE_NAME}_debug_log_detail" class="${MODULE_NAME}_debug_log_detail">Select a log entry</pre>
             </div>
           </div>
-          <div class="${MODULE_NAME}_preset_column">
-            <h4>Schema Presets</h4>
-            <div id="${MODULE_NAME}_schema_presets_list" class="${MODULE_NAME}_preset_list">
-              ${renderPresetList('schema')}
-            </div>
-          </div>
-        </div>
 
-        <div class="${MODULE_NAME}_settings_row_spread">
-          <button id="${MODULE_NAME}_export_presets" class="menu_button">
-            <i class="fa-solid fa-file-export"></i>
-            Export Custom
-          </button>
-          <button id="${MODULE_NAME}_import_presets" class="menu_button">
-            <i class="fa-solid fa-file-import"></i>
-            Import
-          </button>
-        </div>
-      </div>
-
-      <!-- Keyboard Shortcuts -->
-      <div class="${MODULE_NAME}_settings_section">
-        <div class="${MODULE_NAME}_settings_section_header">
-          <i class="fa-solid fa-keyboard"></i>
-          <span>Keyboard Shortcuts</span>
-        </div>
-
-        <div class="${MODULE_NAME}_shortcuts_list">
-          <div class="${MODULE_NAME}_shortcut_item">
-            <kbd>Ctrl</kbd> + <kbd>Enter</kbd>
-            <span>Run current stage</span>
-          </div>
-          <div class="${MODULE_NAME}_shortcut_item">
-            <kbd>Escape</kbd>
-            <span>Cancel generation</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Debug -->
-      <div class="${MODULE_NAME}_settings_section">
-        <div class="${MODULE_NAME}_settings_section_header">
-          <i class="fa-solid fa-bug"></i>
-          <span>Debug</span>
-        </div>
-
-        <div class="${MODULE_NAME}_settings_row">
-          <label class="${MODULE_NAME}_checkbox_label">
-            <input
-              type="checkbox"
-              id="${MODULE_NAME}_debug_mode"
-              ${settings.debugMode ? 'checked' : ''}
-            >
-            <span>Enable Debug Logging</span>
-          </label>
-        </div>
-
-        <div class="${MODULE_NAME}_debug_actions">
-          <button id="${MODULE_NAME}_view_logs" class="menu_button">
-            <i class="fa-solid fa-list"></i>
-            View Logs
-          </button>
-          <button id="${MODULE_NAME}_clear_logs" class="menu_button">
-            <i class="fa-solid fa-trash"></i>
-            Clear
-          </button>
-          <button id="${MODULE_NAME}_copy_debug_info" class="menu_button">
-            <i class="fa-solid fa-copy"></i>
-            Copy Info
-          </button>
-        </div>
-
-        <div id="${MODULE_NAME}_debug_log_viewer" class="${MODULE_NAME}_debug_log_viewer hidden">
-          <div id="${MODULE_NAME}_debug_log_list" class="${MODULE_NAME}_debug_log_list"></div>
-          <pre id="${MODULE_NAME}_debug_log_detail" class="${MODULE_NAME}_debug_log_detail">Select a log entry</pre>
         </div>
       </div>
 
@@ -344,6 +353,7 @@ function buildSettingsContent(): string {
     </div>
   `;
 }
+
 
 function renderPresetList(type: 'prompt' | 'schema'): string {
     const presets = type === 'prompt' ? getPromptPresets() : getSchemaPresets();

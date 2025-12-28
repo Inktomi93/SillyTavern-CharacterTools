@@ -1,5 +1,5 @@
-/* style.css - Character Tools Extension v1.2.0 */
-/* Mobile-first, two-column desktop layout, inherits ST variables */
+/* style.css - Character Tools Extension v1.2.1 */
+/* Mobile-first, two-column desktop layout, fills available space */
 
 /* ============================================================================
    POPUP WIDTH OVERRIDE - Force wider popup
@@ -73,7 +73,7 @@
 }
 
 /* ============================================================================
-   POPUP - CORE LAYOUT (Mobile: single column)
+   POPUP - CORE LAYOUT
    ============================================================================ */
 
 .character_tools_popup {
@@ -81,7 +81,7 @@
   flex-direction: column;
   gap: 12px;
   width: 100%;
-  max-width: 100%;
+  height: 100%;
   min-height: 0;
   color: var(--SmartThemeBodyColor);
   font-family: var(--mainFontFamily);
@@ -99,6 +99,7 @@
   gap: 8px;
   padding-bottom: 10px;
   border-bottom: 1px solid var(--SmartThemeBorderColor);
+  flex-shrink: 0;
 }
 
 .character_tools_popup_title {
@@ -138,7 +139,7 @@
 }
 
 /* ============================================================================
-   MAIN CONTENT AREA (will become two columns on desktop)
+   MAIN CONTENT AREA
    ============================================================================ */
 
 .character_tools_main_content {
@@ -147,23 +148,26 @@
   gap: 12px;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
-/* Left column container (character + pipeline + stage config) */
+/* Left column container */
 .character_tools_left_column {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  overflow-y: auto;
 }
 
-/* Right column container (results + iteration history) */
+/* Right column container */
 .character_tools_right_column {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
   flex: 1;
+  overflow: hidden;
 }
 
 /* ============================================================================
@@ -220,11 +224,16 @@
   border: 1px solid var(--SmartThemeBorderColor);
   border-radius: 6px;
   padding: 10px;
+  flex-shrink: 0;
 }
 
 .character_tools_section_grow {
   flex: 1;
   min-height: 200px;
+  flex-shrink: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .character_tools_section_header {
@@ -240,6 +249,7 @@
   padding: 8px 10px;
   background: var(--SmartThemeChatTintColor);
   border-radius: 5px 5px 0 0;
+  flex-shrink: 0;
 }
 
 .character_tools_section_header i {
@@ -751,7 +761,7 @@
 .character_tools_preset_select {
   flex: 1;
   min-width: 100px;
-  max-width: 180px;
+  max-width: 200px;
   padding-right: 24px;
   font-size: 0.85em;
   text-overflow: ellipsis;
@@ -904,6 +914,7 @@
   gap: 10px;
   padding: 24px 16px;
   text-align: center;
+  flex: 1;
   min-height: 150px;
   color: var(--SmartThemeBodyColor);
 }
@@ -920,6 +931,8 @@
 .character_tools_results_content {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   border: 1px solid var(--SmartThemeBorderColor);
   border-radius: 4px;
   background: var(--SmartThemeChatTintColor);
@@ -935,6 +948,7 @@
   padding: 6px 8px;
   background: var(--SmartThemeBlurTintColor);
   border-bottom: 1px solid var(--SmartThemeBorderColor);
+  flex-shrink: 0;
 }
 
 .character_tools_results_info {
@@ -957,7 +971,7 @@
 
 .character_tools_results_body {
   padding: 12px;
-  max-height: 300px;
+  flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
   line-height: 1.5;
@@ -970,6 +984,7 @@
   padding: 6px 8px;
   background: var(--SmartThemeBlurTintColor);
   border-top: 1px solid var(--SmartThemeBorderColor);
+  flex-shrink: 0;
 }
 
 .character_tools_footer_actions {
@@ -1035,6 +1050,7 @@
   border-radius: 4px;
   background: var(--SmartThemeChatTintColor);
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .character_tools_iteration_header {
@@ -2000,26 +2016,6 @@
     width: 16px;
   }
 
-  .character_tools_preset_select {
-    max-width: 200px;
-  }
-
-  .character_tools_prompt_textarea {
-    min-height: 100px;
-  }
-
-  .character_tools_results_body {
-    max-height: 350px;
-  }
-
-  .character_tools_char_fields {
-    max-height: 150px;
-  }
-
-  .character_tools_iteration_list {
-    max-height: 150px;
-  }
-
   .character_tools_settings_grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -2048,26 +2044,23 @@
    ============================================================================ */
 
 @media (min-width: 900px) {
-  .character_tools_popup {
-    max-width: 1400px;
-    margin: 0 auto;
-  }
-
   .character_tools_main_content {
     flex-direction: row;
     gap: 16px;
   }
 
+  /* Left column: 40% of space, min 350px, max 500px */
   .character_tools_left_column {
-    width: 400px;
+    flex: 0 0 40%;
     min-width: 350px;
-    max-width: 450px;
-    flex-shrink: 0;
+    max-width: 500px;
+    overflow-y: auto;
   }
 
+  /* Right column: fills remaining space */
   .character_tools_right_column {
     flex: 1;
-    min-width: 0;
+    min-width: 400px;
   }
 
   /* Taller elements on desktop */
@@ -2083,13 +2076,8 @@
     min-height: 80px;
   }
 
-  .character_tools_results_body {
-    max-height: 450px;
-    padding: 16px;
-  }
-
   .character_tools_iteration_list {
-    max-height: 200px;
+    max-height: 150px;
   }
 
   .character_tools_preview_content {
@@ -2102,17 +2090,13 @@
 }
 
 /* ============================================================================
-   WIDE DESKTOP (min-width: 1200px)
+   WIDE DESKTOP (min-width: 1400px)
    ============================================================================ */
 
-@media (min-width: 1200px) {
+@media (min-width: 1400px) {
   .character_tools_left_column {
-    width: 450px;
-    max-width: 500px;
-  }
-
-  .character_tools_results_body {
-    max-height: 500px;
+    flex: 0 0 35%;
+    max-width: 550px;
   }
 }
 
@@ -2138,11 +2122,6 @@
     max-height: 80px;
   }
 
-  .character_tools_results_body {
-    max-height: 200px;
-    padding: 8px;
-  }
-
   .character_tools_prompt_textarea {
     min-height: 60px;
   }
@@ -2163,10 +2142,6 @@
 
   .character_tools_char_fields {
     max-height: 60px;
-  }
-
-  .character_tools_results_body {
-    max-height: 150px;
   }
 
   .character_tools_iteration_history {
